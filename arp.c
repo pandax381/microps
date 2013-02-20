@@ -1,8 +1,9 @@
-#include "arp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#include <signal.h>
+#include "arp.h"
 
 #define ARP_HRD_ETHERNET 0x0001
 #define ARP_OP_REQUEST 1
@@ -36,12 +37,17 @@ static struct {
 	int num;
 	int position;
 	pthread_rwlock_t rwlock;
-} g_arp = {{0}, 0, 0, PTHREAD_RWLOCK_INITIALIZER};
+} g_arp;
 
 static int
 arp_send_request (const ip_addr_t *tpa);
 static int
-arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa);
+arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst);
+
+void
+arp_init (void) {
+	pthread_rwlock_init(&g_arp.rwlock, NULL);
+}
 
 int
 arp_table_lookup (const ip_addr_t *pa, ethernet_addr_t *ha) {
@@ -65,6 +71,9 @@ arp_table_lookup (const ip_addr_t *pa, ethernet_addr_t *ha) {
 					memcpy(ha, &g_arp.table[offset].ha, sizeof(ethernet_addr_t));
 					break;
 				}
+			}
+			if (offset < g_arp.num) {
+				break;
 			}
 		}
 	}
@@ -99,19 +108,23 @@ arp_table_update (const ethernet_addr_t *ha, const ip_addr_t *pa) {
 }
 
 void
-arp_recv (uint8_t *buf, ssize_t len, int bcast) {
+arp_recv (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
 	struct arp *arp;
 
-	if (len < sizeof(struct arp)) {
+	(void)dst;
+	if (plen < sizeof(struct arp)) {
 		return;
 	}
-	arp = (struct arp *)buf;
+	arp = (struct arp *)packet;
 	if (ntohs(arp->hdr.hrd) != ARP_HRD_ETHERNET || ntohs(arp->hdr.pro) != ETHERNET_TYPE_IP) {
+		return;
+	}
+	if (!ip_addr_islink(&arp->spa)) {
 		return;
 	}
 	if (ip_addr_isself(&arp->tpa)) {
 		if (ntohs(arp->hdr.op) == ARP_OP_REQUEST) {
-			arp_send_reply(&arp->sha, &arp->spa);
+			arp_send_reply(&arp->sha, &arp->spa, src);
 		}
 		arp_table_update(&arp->sha, &arp->spa);
 	} else if (arp->spa == arp->tpa) {
@@ -145,7 +158,7 @@ ERROR:
 }
 
 static int
-arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa) {
+arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
 	struct arp arp;
 
 	if (!tha || !tpa) {
@@ -160,13 +173,36 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa) {
 	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
 	memcpy(&arp.tha, tha, ETHERNET_ADDR_LEN);
 	memcpy(&arp.tpa, tpa, IP_ADDR_LEN);
-	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), tha) < 0) {
+	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), dst) < 0) {
 		goto ERROR;
 	}
 	return  0;
 
 ERROR:
 	return -1;
+}
+
+int
+arp_send_garp (void) {
+	struct arp arp;
+
+	arp.hdr.hrd = htons(ARP_HRD_ETHERNET);
+	arp.hdr.pro = htons(ETHERNET_TYPE_IP);
+	arp.hdr.hln = 6;
+	arp.hdr.pln = 4;
+	arp.hdr.op = htons(ARP_OP_REQUEST);
+	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
+	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
+	memcpy(&arp.tha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
+	memcpy(&arp.tpa, ip_get_addr(), IP_ADDR_LEN);
+	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), &ETHERNET_ADDR_BCAST) < 0) {
+		goto ERROR;
+	}
+	return  0;
+
+ERROR:
+	return -1;
+	
 }
 
 #ifdef _ARP_UNIT_TEST
@@ -178,39 +214,49 @@ arp_table_print (void) {
 	char ha[ETHERNET_ADDR_STR_LEN + 1], pa[IP_ADDR_STR_LEN + 1];
 
 	pthread_rwlock_rdlock(&g_arp.rwlock);
+	fprintf(stderr, "\n");
+	fprintf(stderr, "--------------------------------\n");
 	for (offset = 0; offset < g_arp.num; offset++) {
 		ethernet_addr_ntop(&g_arp.table[offset].ha, ha, sizeof(ha));
 		ip_addr_ntop(&g_arp.table[offset].pa, pa, sizeof(pa));
 		fprintf(stderr, "%s at %s\n", pa, ha);
 	}
+	fprintf(stderr, "--------------------------------\n");
 	pthread_rwlock_unlock(&g_arp.rwlock);
 }
 
 int
 main (int argc, char *argv[]) {
-    char device[] = "en0";
-    char ethernet_addr[] = "58:55:ca:fb:6e:9f";
-	//char ip_addr[] = "10.10.2.228";
-	char ip_addr[] = "10.13.100.100";
-	ip_addr_t pa;
-	ethernet_addr_t ha;
+	sigset_t sigset;
+	int signo;
 
-	ip_set_addr(ip_addr);
-    ethernet_set_addr(ethernet_addr);
+	if (argc != 5) {
+		fprintf(stderr, "usage: %s device-name ethernet-addr ip-addr netmask\n", argv[0]);
+		goto ERROR;
+	}
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGINT);
+	sigprocmask(SIG_BLOCK, &sigset, NULL);
+
+	if (ip_set_addr(argv[3], argv[4]) == -1) {
+		fprintf(stderr, "error: ip-addr/netmask is invalid\n");
+		goto ERROR;
+	}
+	arp_init();
+    if (ethernet_set_addr(argv[2]) == -1) {
+		fprintf(stderr, "error: ethernet-addr is invalid\n");
+		goto ERROR;
+	}
     ethernet_add_handler(ETHERNET_TYPE_ARP, arp_recv);
-    if (device_init(device, ethernet_recv) == -1) {
+    if (device_init(argv[1], ethernet_recv) == -1) {
         goto ERROR;
     }
-	ip_addr_pton("10.13.0.1", &pa);
-	if (arp_table_lookup(&pa, &ha) == -1) {
-		fprintf(stderr, "arp lookup error.\n");
-	}
+	sigwait(&sigset, &signo);
 	arp_table_print();
     device_cleanup();
     return  0;
 
 ERROR:
-    device_cleanup();
     return -1;
 }
 #endif

@@ -1,8 +1,9 @@
-#include "device.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/types.h>
@@ -12,8 +13,9 @@
 #include <sys/ioctl.h>
 #include <net/bpf.h>
 #include <net/if.h>
-#include <pthread.h>
-#include <errno.h>
+#include "device.h"
+
+#define BPF_DEVICE_NUM 4
 
 static void *
 device_reader_thread (void *arg);
@@ -25,7 +27,7 @@ static struct {
 	int terminate;
 	pthread_t thread;
 	__device_interrupt_handler_t handler;
-} g_device = {-1, NULL, 0, 0, 0, NULL};
+} g_device;
 
 int
 device_init (const char *device_name, __device_interrupt_handler_t handler) {
@@ -33,7 +35,8 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	char dev[16];
 	struct ifreq ifr;
 
-	for (index = 0; index < 4; index++) {
+	g_device.thread = pthread_self();
+	for (index = 0; index < BPF_DEVICE_NUM; index++) {
 		snprintf(dev, sizeof(dev), "/dev/bpf%d", index);
 		if ((g_device.fd = open(dev, O_RDWR, 0)) != -1) {
 			break;
@@ -83,15 +86,16 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	return  0;
 
 ERROR:
+	device_cleanup();
 	return -1;
 }
 
 void
 device_cleanup (void) {
-	if (g_device.thread) {
+	if (pthread_equal(g_device.thread, pthread_self()) == 0) {
 		g_device.terminate = 1;
 		pthread_join(g_device.thread, NULL);
-		g_device.thread = 0;
+		g_device.thread = pthread_self();
 	}
 	g_device.terminate = 0;
 	if (g_device.fd != -1) {
@@ -106,17 +110,14 @@ device_cleanup (void) {
 
 static void *
 device_reader_thread (void *arg) {
-	ssize_t len = 0, bpf_frame;
+	ssize_t len = 0;
 	struct bpf_hdr *hdr;
 
+	(void)arg;
 	while (!g_device.terminate) {
 		if (len <= 0) {
 			len = read(g_device.fd, g_device.buffer, g_device.buffer_size);
 			if (len == -1) {
-				if (errno != EINTR) {
-					perror("read");
-					break;
-				}
 				continue;
 			}
 			hdr = (struct bpf_hdr *)g_device.buffer;
@@ -145,22 +146,36 @@ device_writev (const struct iovec *iov, int iovcnt) {
 }
 
 #ifdef _DEVICE_UNIT_TEST
+
+#include "util.h"
+
 void
-dummy_function (uint8_t *buf, ssize_t len) {
-	printf("input: %ld\n", len);
+interrupt_handler (uint8_t *buf, size_t len) {
+	printf("input: %ld octets\n", len);
+	hexdump(stderr, buf, len);
 }
 
 int
 main (int argc, char *argv[]) {
-	if (device_init("en0", dummy_function) == -1) {
+	sigset_t sigset;
+	int signo;
+
+	if (argc != 2) {
+		fprintf(stderr, "usage: %s device-name\n", argv[0]);
 		goto ERROR;
 	}
-	sleep(10);
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGINT);
+	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	if (device_init(argv[1], interrupt_handler) == -1) {
+		goto ERROR;
+	}
+	sigwait(&sigset, &signo);
 	device_cleanup();
 	return  0;
 
 ERROR:
-	device_cleanup();
 	return -1;
 }
+
 #endif

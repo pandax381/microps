@@ -17,20 +17,22 @@ typedef struct {
 	uint8_t addr[ETHERNET_ADDR_LEN];
 } __attribute__ ((packed)) ethernet_addr_t;
 
-typedef void (*__ethernet_handler_t)(uint8_t *, ssize_t, int);
+typedef void (*__ethernet_handler_t)(uint8_t *, size_t, ethernet_addr_t *src, ethernet_addr_t *dst);
 
 extern const ethernet_addr_t ETHERNET_ADDR_BCAST;
 
-ethernet_addr_t *
+extern void
+ethernet_init (void);
+extern ethernet_addr_t *
 ethernet_get_addr (void);
 extern int
 ethernet_set_addr (const char *addr);
 extern int
 ethernet_add_handler (uint16_t type, __ethernet_handler_t handler);
 extern void
-ethernet_recv (uint8_t *buf, ssize_t len);
+ethernet_recv (uint8_t *frame, size_t flen);
 extern ssize_t
-ethernet_send (uint16_t type, const uint8_t *buf, size_t len, const ethernet_addr_t *dst);
+ethernet_send (uint16_t type, const uint8_t *payload, size_t plen, const ethernet_addr_t *dst);
 extern int
 ethernet_addr_pton (const char *p, ethernet_addr_t *n);
 extern char *
