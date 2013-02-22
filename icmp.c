@@ -29,7 +29,12 @@ icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst) {
 		return;
 	}
 	hdr = (struct icmp_hdr *)packet;
-	//fprintf(stderr, "icmp recv: type %u, code %u\n", hdr->type, hdr->code);
+#ifdef _ICMP_UNIT_TEST
+	char ss[IP_ADDR_STR_LEN + 1], ds[IP_ADDR_STR_LEN + 1];
+	fprintf(stderr, "icmp recv: %s > %s, type %u, code %u, length %lu\n",
+		ip_addr_ntop(src, ss, sizeof(ss)), ip_addr_ntop(dst, ds, sizeof(ds)), hdr->type, hdr->code, plen);
+	//hexdump(stderr, packet, plen);
+#endif
 	if (hdr->type == ICMP_TYPE_ECHO_REQUEST) {
 		hdr->type = ICMP_TYPE_ECHO_REPLY;
 		hdr->sum = 0;

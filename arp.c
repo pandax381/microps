@@ -75,6 +75,7 @@ arp_table_lookup (const ip_addr_t *pa, ethernet_addr_t *ha) {
 			if (offset < g_arp.num) {
 				break;
 			}
+			fprintf(stderr, "arp retry\n");
 		}
 	}
 	ret = (offset < g_arp.num) ? 0 : -1;

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
+#include <pthread.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include "ip.h"
@@ -8,8 +9,12 @@
 #include "arp.h"
 #include "util.h"
 
+#define IP_HDR_SIZE_MIN 20
+#define IP_HDR_SIZE_MAX 60
+#define IP_PAYLOAD_SIZE_MAX (ETHERNET_PAYLOAD_SIZE_MAX - IP_HDR_SIZE_MIN)
 #define IP_VERSION_IPV4 4
 #define IP_HANDLER_TABLE_SIZE 16
+#define IP_FRAGMENT_STOCK_SIZE 1024
 
 const ip_addr_t IP_ADDR_BCAST = 0xffffffff;
 
@@ -23,7 +28,20 @@ static struct {
 		__ip_handler_t handler;
 	} handler_table[IP_HANDLER_TABLE_SIZE];
 	int handler_num;
+	struct {
+		uint16_t id;
+		uint16_t protocol;
+		ip_addr_t src;
+		uint16_t len;
+		uint8_t payload[65536];
+		uint8_t check[65536];
+	} fragment_stock[IP_FRAGMENT_STOCK_SIZE];
 } g_ip;
+
+static void
+ip_recv_fragment (struct ip_hdr *hdr, uint8_t *payload, size_t plen);
+static ssize_t
+ip_send_core (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst, uint16_t id, uint16_t offset);
 
 ip_addr_t *
 ip_get_addr (void) {
@@ -73,13 +91,16 @@ ip_recv (uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst
 	}
 	hdr = (struct ip_hdr *)dgram;
 	if ((hdr->vhl >> 4 & 0x0f) != 4) {
+		fprintf(stderr, "not ipv4 packet.\n");
 		return;
 	}
 	hlen = (hdr->vhl & 0x0f) << 2;
 	if (dlen < hlen || dlen < ntohs(hdr->len)) {
+		fprintf(stderr, "ip packet length error.\n");
 		return;
 	}
 	if (cksum16((uint16_t *)hdr, hlen, 0) != 0) {
+		fprintf(stderr, "ip checksum error.\n");
 		return;
 	}
 	if (ip_addr_cmp(&g_ip.addr, &hdr->dst) != 0) {
@@ -87,35 +108,122 @@ ip_recv (uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst
 			return;
 		}
 	}
-	offset = ntohs(hdr->offset);
-	if (offset & 0x2000 || offset & 0x1fff) {
-		// flagment packet.
-		return;
-	}
 	payload = (uint8_t *)(hdr + 1);
 	plen = ntohs(hdr->len) - sizeof(struct ip_hdr);
-	for (offset = 0; offset < g_ip.handler_num; offset++) {
-		if (g_ip.handler_table[offset].protocol == hdr->protocol) {
-			g_ip.handler_table[offset].handler(payload, plen, &hdr->src, &hdr->dst);
+	offset = ntohs(hdr->offset);
+	if (offset & 0x2000 || offset & 0x1fff) {
+		ip_recv_fragment(hdr, payload, plen);
+	} else {
+		for (offset = 0; offset < g_ip.handler_num; offset++) {
+			if (g_ip.handler_table[offset].protocol == hdr->protocol) {
+				g_ip.handler_table[offset].handler(payload, plen, &hdr->src, &hdr->dst);
+				break;
+			}
+		}
+	}
+}
+
+static void
+ip_recv_fragment (struct ip_hdr *hdr, uint8_t *payload, size_t plen) {
+	uint16_t offset;
+	int index, stock = 0;
+
+	offset = (ntohs(hdr->offset) & 0x1fff) << 3;
+	for (index = 0; index < IP_FRAGMENT_STOCK_SIZE; index++) {
+		if (g_ip.fragment_stock[index].id == hdr->id && g_ip.fragment_stock[index].protocol == hdr->protocol) {
+			if (ip_addr_cmp(&g_ip.fragment_stock[index].src, &hdr->src) == 0) {
+				memcpy(g_ip.fragment_stock[index].payload + offset, payload, plen);
+				memset(g_ip.fragment_stock[index].check + offset, 1, plen);
+				break;
+			}
+		} else if (stock == 0 && g_ip.fragment_stock[index].id == 0 && g_ip.fragment_stock[index].protocol == 0) {
+			stock = index;
+		}
+	}
+	if (index == IP_FRAGMENT_STOCK_SIZE) {
+		if (stock == 0) {
+			return;
+		}
+		index = stock;
+		g_ip.fragment_stock[index].id = hdr->id;
+		g_ip.fragment_stock[index].protocol = hdr->protocol;
+		g_ip.fragment_stock[index].src = hdr->src;
+		memcpy(g_ip.fragment_stock[index].payload + offset, payload, plen);
+		memset(g_ip.fragment_stock[index].check + offset, 1, plen);
+	}
+	if ((ntohs(hdr->offset) & 0x2000) == 0) {
+		g_ip.fragment_stock[index].len = offset + plen;
+	}
+	if (g_ip.fragment_stock[index].len == 0) {
+		return;
+	}
+	int i;
+	for (i = 0; i < (int)g_ip.fragment_stock[index].len; i++) {
+		if (g_ip.fragment_stock[index].check[i] != 1) {
+			return;
+		}
+	}
+	for (i = 0; i < g_ip.handler_num; i++) {
+		if (g_ip.handler_table[i].protocol == hdr->protocol) {
+			g_ip.handler_table[i].handler(g_ip.fragment_stock[index].payload, offset + plen, &hdr->src, &hdr->dst);
+			g_ip.fragment_stock[index].id = 0;
+			g_ip.fragment_stock[index].protocol = 0;
+			g_ip.fragment_stock[index].src = 0;
+			g_ip.fragment_stock[index].len = 0;
+			memset(g_ip.fragment_stock[index].payload, 0, sizeof(g_ip.fragment_stock[index].payload));
+			memset(g_ip.fragment_stock[index].check, 0, sizeof(g_ip.fragment_stock[index].check));
 			break;
 		}
 	}
 }
 
+uint16_t
+ip_generate_id (void) {
+	static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+	static uint16_t id = 0;
+	uint16_t ret;
+
+	pthread_mutex_lock(&mutex);
+	ret = id++;
+	pthread_mutex_unlock(&mutex);
+	return ret;
+}
+
 ssize_t
 ip_send (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst) {
+	uint16_t id;
+	size_t len2;
+	uint16_t offset = 0, flag;
+	ssize_t ret;
+
+	id = ip_generate_id();
+	while ((len - offset) != 0) {
+		len2 = ((len - offset) > IP_PAYLOAD_SIZE_MAX) ? IP_PAYLOAD_SIZE_MAX : (len - offset);
+		flag = (len - (len2 + offset) > 0) ? 0x2000 : 0x0000;
+		ret = ip_send_core (protocol, buf + offset, len2, dst, id, flag | (uint16_t)((offset >> 3) & 0x1fff));
+		if (ret != (ssize_t)len2) {
+			return -1;
+		}
+		offset += len2;
+	}
+	return len;
+}
+
+static ssize_t
+ip_send_core (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst, uint16_t id, uint16_t offset) {
 	uint8_t packet[1500];
 	struct ip_hdr *hdr;
-	static uint16_t hlen, id = 0;
+	uint16_t hlen;
 	ethernet_addr_t dst_ha;
+	ssize_t ret;
 
 	hdr = (struct ip_hdr *)packet;
 	hlen = sizeof(struct ip_hdr);
 	hdr->vhl = (IP_VERSION_IPV4 << 4) | (hlen >> 2);
 	hdr->tos = 0;
 	hdr->len = htons(hlen + len);
-	hdr->id = htons(++id);
-	hdr->offset = 0;
+	hdr->id = htons(id);
+	hdr->offset = htons(offset);
 	hdr->ttl = 0xff;
 	hdr->protocol = protocol;
 	hdr->sum = 0;
@@ -125,12 +233,14 @@ ip_send (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst)
 	hdr->sum = cksum16((uint16_t *)hdr, hlen, 0);
 	memcpy(hdr + 1, buf, len);
 	if (arp_table_lookup (ip_addr_islink(dst) ? dst : &g_ip.gw, &dst_ha) == -1) {
+		fprintf(stderr, "arp lookup error.\n");
 		return -1;
 	}
-	if (ethernet_send(ETHERNET_TYPE_IP, (uint8_t *)packet, sizeof(struct ip_hdr) + len, &dst_ha) < 0) {
+	ret = ethernet_send(ETHERNET_TYPE_IP, (uint8_t *)packet, hlen + len, &dst_ha);
+	if (ret != (ssize_t)(hlen + len)) {
 		return -1;
 	}
-	return 0;
+	return len;
 }
 
 int

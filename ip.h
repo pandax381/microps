@@ -14,6 +14,8 @@
 #define IP_ADDR_LEN 4
 #define IP_ADDR_STR_LEN 15
 
+#define IP_DATA_SIZE_MAX 65535
+
 typedef uint32_t ip_addr_t;
 
 struct ip_hdr {

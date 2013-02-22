@@ -1,38 +1,36 @@
-#include "pkt.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <netpacket/packet.h>
 #include <net/ethernet.h>
 #include <net/if.h>
 #include <arpa/inet.h>
+#include "device.h"
 
-struct pkt {
-	int soc;
-};
+struct {
+	int fd;  
+	int terminate;
+	pthread_t thread;
+	__device_interrupt_handler_t handler;
+} g_device;
 
-pkt_t *
-pkt_open (const char *name) {
-	pkt_t *obj;
+int
+device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	struct ifreq ifr;
 	struct sockaddr_ll sockaddr;
 
-	if (name == NULL || name[0] == '\0') {
-		goto ERROR;
-	}
-	if ((obj = malloc(sizeof(pkt_t))) == NULL) {
-		perror("malloc");
-		goto ERROR;
-	}
-	if ((obj->soc = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
+	g_device.thread = pthread_self();
+	if ((g_device.fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
 		perror("socket");
 		goto ERROR;
 	}
 	strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
-	if (ioctl(obj->soc, SIOCGIFINDEX, &ifr) == -1) {
+	if (ioctl(g_device.fd, SIOCGIFINDEX, &ifr) == -1) {
 		perror("ioctl [SIOCGIFINDEX]");
 		goto ERROR;
 	}
@@ -40,48 +38,103 @@ pkt_open (const char *name) {
 	sockaddr.sll_family = AF_PACKET;
 	sockaddr.sll_protocol = htons(ETH_P_ALL);
 	sockaddr.sll_ifindex = ifr.ifr_ifindex;
-	if (bind(obj->soc, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
+	if (bind(g_device.fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
 		perror("bind");
 		goto ERROR;
 	}
-	if (ioctl(obj->soc, SIOCGIFFLAGS, &ifr) == -1) {
+	if (ioctl(g_device.fd, SIOCGIFFLAGS, &ifr) == -1) {
 		perror("ioctl [SIOCGIFFLAGS]");
 		goto ERROR;
 	}
 	ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC;
-	if (ioctl(obj->soc, SIOCSIFFLAGS, &ifr) == -1) {
+	if (ioctl(g_device.fd, SIOCSIFFLAGS, &ifr) == -1) {
 		perror("ioctl [SIOCSIFFLAGS]");
 		goto ERROR;
 	}
-	return obj;
+	return  0;
 
 ERROR:
-	pkt_close(obj);
-	return NULL;
+	device_cleanup();
+	return -1;
 }
 
 void
-pkt_close (pkt_t *obj) {
-	if (obj) {
-		if (obj->soc != -1) {
-			close(obj->soc);
+device_cleanup (void) {
+	g_device.terminate = 1;
+	if (pthread_equal(g_device.thread, pthread_self()) == 0) {
+		pthread_join(g_device.thread, NULL);
+		g_device.thread = pthread_self();
+	}
+	g_device.terminate = 0;
+	if (g_device.fd != -1) {
+		close(g_device.fd);
+		g_device.fd = -1;
+	}
+	g_device.handler = NULL;
+}
+
+static void *
+device_reader_thread (void *arg) {
+	uint8_t buf[2048];
+	ssize_t len;
+
+	(void)arg;
+	while (!g_device.terminate) {
+		len = read(g_device.fd, buf, sizeof(buf));
+		if (len == -1) {
+			continue;
 		}
-		free(obj);
+		if (g_device.handler) {
+			g_device.handler(buf, len);
+		}
 	}
+	pthread_exit(NULL);
 }
 
 ssize_t
-pkt_write (pkt_t *obj, const uint8_t *buffer, size_t length) {
-	if (!obj || !buffer) {
+device_write (const uint8_t *buffer, size_t len) {
+	if (!buffer) {
 		return -1;
 	}
-	return write(obj->soc, buffer, length);
+	return write(g_device.fd, buffer, len);
 }
 
 ssize_t
-pkt_read (pkt_t *obj, uint8_t *buffer, size_t length) {
-	if (!obj || !buffer) {
-		return -1;
-	}
-	return read(obj->soc, buffer, length);
+device_writev (const struct iovec *iov, int iovcnt) {
+	return writev(g_device.fd, iov, iovcnt);
 }
+
+#ifdef _DEVICE_UNIT_TEST
+
+#include "util.h"
+
+void
+interrupt_handler (uint8_t *buf, size_t len) {
+	printf("device input: %ld octets\n", len);
+	hexdump(stderr, buf, len);
+}
+
+int
+main (int argc, char *argv[]) {
+	sigset_t sigset;
+	int signo;
+
+	if (argc != 2) {
+		fprintf(stderr, "usage: %s device-name\n", argv[0]);
+		goto ERROR;
+	}
+	sigemptyset(&sigset);
+	sigaddset(&sigset, SIGINT);
+	sigprocmask(SIG_BLOCK, &sigset, NULL);
+	if (device_init(argv[1], interrupt_handler) == -1) {
+		goto ERROR;
+	}
+	sigwait(&sigset, &signo);
+	device_cleanup();
+	return  0;
+
+ERROR:
+	return -1;
+}
+
+#endif

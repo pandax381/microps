@@ -14,6 +14,7 @@
 #include <net/bpf.h>
 #include <net/if.h>
 #include "device.h"
+#include "util.h"
 
 #define BPF_DEVICE_NUM 4
 
@@ -46,7 +47,7 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 		perror("open");
 		goto ERROR;
 	}
-	strcpy(ifr.ifr_name, device_name);
+	strncpy(ifr.ifr_name, device_name, IFNAMSIZ - 1);
 	if (ioctl(g_device.fd, BIOCSETIF, &ifr) == -1) {
 		perror("ioctl [BIOCSETIF]");
 		goto ERROR;
@@ -92,8 +93,8 @@ ERROR:
 
 void
 device_cleanup (void) {
+	g_device.terminate = 1;
 	if (pthread_equal(g_device.thread, pthread_self()) == 0) {
-		g_device.terminate = 1;
 		pthread_join(g_device.thread, NULL);
 		g_device.thread = pthread_self();
 	}
@@ -151,7 +152,7 @@ device_writev (const struct iovec *iov, int iovcnt) {
 
 void
 interrupt_handler (uint8_t *buf, size_t len) {
-	printf("input: %ld octets\n", len);
+	printf("device input: %ld octets\n", len);
 	hexdump(stderr, buf, len);
 }
 

@@ -71,6 +71,7 @@ queue_push (struct queue_head *queue, void *data, size_t size) {
 	if (!queue->next) {
 		queue->next = entry;
 	}
+	queue->num++;
 	return entry;
 }
 
@@ -86,5 +87,28 @@ queue_pop (struct queue_head *queue) {
 	if (!entry->next) {
 		queue->tail = NULL;
 	}
+	queue->num--;
 	return entry;
 }
+/*
+void
+bitmap_set_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {
+	size_t index, pos, bit;
+
+	if (offset + len > size * 32) {
+		return;
+	}
+	while (len) {
+		index = offset / 32;
+		pos = offset % 32;
+		bit = (len < (32 - pos)) ? len : (32 - pos);
+		bitmap[index] = (0xffffffff >> pos) & (0xffffffff << 32 - (pos + bit));
+		len -= bit;
+		offset += bit;
+	}
+}
+
+int
+bitmap_check_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {
+}
+*/

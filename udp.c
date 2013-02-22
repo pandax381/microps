@@ -169,12 +169,11 @@ udp_recv (uint8_t *dgram, size_t dlen, ip_addr_t *src, ip_addr_t *dst) {
 		// icmp_send_destination_unreachable();
 	}
 	pthread_mutex_unlock(&dsc->mutex);
-	// unlock
 }
 
 ssize_t
 udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
-	char packet[1500];
+	char packet[65536];
 	struct udp_hdr *hdr;
 	uint32_t pseudo = 0;
 	ip_addr_t *self;
@@ -206,7 +205,7 @@ udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16
 int
 main (int argc, char *argv[]) {
 	struct udp_dsc *dsc;
-	uint8_t buf[1500];
+	uint8_t buf[65536];
 	ip_addr_t peer_addr;
 	uint16_t peer_port;
 	ssize_t len;
