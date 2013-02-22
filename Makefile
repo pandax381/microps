@@ -2,15 +2,17 @@ PROGRAM = echo_server
 
 OBJECTS = microps.o udp.o icmp.o ip.o arp.o ethernet.o util.o
 
+CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter
+
 ifeq ($(shell uname),Linux)
 	OBJECTS := $(OBJECTS) pkt.o
+	CFLAGS  := $(CFLAGS) -lpthread
 endif
 
 ifeq ($(shell uname),Darwin)
 	OBJECTS := $(OBJECTS) bpf.o
 endif
 
-CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -lpthread
 
 .SUFFIXES:
 .SUFFIXES: .c .o
@@ -19,7 +21,7 @@ CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -lpthread
 
 all: $(PROGRAM)
 
-$(PROGRAM): % : %.c $(OBJECTS)
+$(PROGRAM): % : %.o $(OBJECTS)
 	$(CC) $(CFLAGS) -o $@ $< $(OBJECTS) $(LDFLAGS)
 
 .c.o:
