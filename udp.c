@@ -36,9 +36,6 @@ struct {
 	struct udp_dsc port_table[UDP_PORT_TABLE_SIZE];
 } g_udp;
 
-ssize_t
-udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port);
-
 void
 udp_init (void) {
 	int index;
