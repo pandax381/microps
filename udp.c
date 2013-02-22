@@ -6,7 +6,6 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/queue.h>
-#include <arpa/inet.h>
 
 #define UDP_PORT_TABLE_SIZE 65536
 #define UDP_PORT_DINAMIC_MIN 49152
@@ -153,12 +152,12 @@ udp_recv (uint8_t *dgram, size_t dlen, ip_addr_t *src, ip_addr_t *dst) {
 	pseudo += *src & 0xffff;
 	pseudo += *dst >> 16;
 	pseudo += *dst & 0xffff;
-	pseudo += htons((uint16_t)IP_PROTOCOL_UDP);
-	pseudo += htons(dlen);
+	pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
+	pseudo += hton16(dlen);
 	if (cksum16((uint16_t *)hdr, dlen, pseudo) != 0) {
 		return;
 	}
-	dsc = &g_udp.port_table[ntohs(hdr->dport)];
+	dsc = &g_udp.port_table[ntoh16(hdr->dport)];
 	pthread_mutex_lock(&dsc->mutex);
 	if (dsc->used) {
 		data = malloc(sizeof(struct udp_queue_hdr) + (dlen - sizeof(struct udp_hdr)));
@@ -168,7 +167,7 @@ udp_recv (uint8_t *dgram, size_t dlen, ip_addr_t *src, ip_addr_t *dst) {
 		}
 		queue_hdr = data;
 		queue_hdr->addr = *src;
-		queue_hdr->port = ntohs(hdr->sport);
+		queue_hdr->port = ntoh16(hdr->sport);
 		queue_hdr->len = dlen - sizeof(struct udp_hdr);
 		memcpy(queue_hdr + 1, hdr + 1, dlen - sizeof(struct udp_hdr));
 		queue_push(&dsc->queue, data, sizeof(struct udp_queue_hdr) + (dlen - sizeof(struct udp_hdr)));
@@ -187,9 +186,9 @@ udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16
 	ip_addr_t *self;
 
 	hdr = (struct udp_hdr *)packet;
-	hdr->sport = htons(dsc->port);
-	hdr->dport = htons(port);
-	hdr->len = htons(sizeof(struct udp_hdr) + len);
+	hdr->sport = hton16(dsc->port);
+	hdr->dport = hton16(port);
+	hdr->len = hton16(sizeof(struct udp_hdr) + len);
 	hdr->sum = 0;
 	memcpy(hdr + 1, buf, len);
 	self = ip_get_addr();
@@ -197,8 +196,8 @@ udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16
 	pseudo += *self & 0xffff;
 	pseudo += (*peer >> 16) & 0xffff;
 	pseudo += *peer & 0xffff;
-	pseudo += htons((uint16_t)IP_PROTOCOL_UDP);
-	pseudo += htons(sizeof(struct udp_hdr) + len);
+	pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
+	pseudo += hton16(sizeof(struct udp_hdr) + len);
 	hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct udp_hdr) + len, pseudo);
 	return ip_send(IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
 }

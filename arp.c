@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <arpa/inet.h>
 #include "arp.h"
+#include "util.h"
 
 #define ARP_HRD_ETHERNET 0x0001
 #define ARP_OP_REQUEST 1
@@ -118,14 +119,14 @@ arp_recv (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *d
 		return;
 	}
 	arp = (struct arp *)packet;
-	if (ntohs(arp->hdr.hrd) != ARP_HRD_ETHERNET || ntohs(arp->hdr.pro) != ETHERNET_TYPE_IP) {
+	if (ntoh16(arp->hdr.hrd) != ARP_HRD_ETHERNET || ntoh16(arp->hdr.pro) != ETHERNET_TYPE_IP) {
 		return;
 	}
 	if (!ip_addr_islink(&arp->spa)) {
 		return;
 	}
 	if (ip_addr_isself(&arp->tpa)) {
-		if (ntohs(arp->hdr.op) == ARP_OP_REQUEST) {
+		if (ntoh16(arp->hdr.op) == ARP_OP_REQUEST) {
 			arp_send_reply(&arp->sha, &arp->spa, src);
 		}
 		arp_table_update(&arp->sha, &arp->spa);
@@ -141,11 +142,11 @@ arp_send_request (const ip_addr_t *tpa) {
 	if (!tpa) {
 		goto ERROR;
 	}
-	arp.hdr.hrd = htons(ARP_HRD_ETHERNET);
-	arp.hdr.pro = htons(ETHERNET_TYPE_IP);
+	arp.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+	arp.hdr.pro = hton16(ETHERNET_TYPE_IP);
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
-	arp.hdr.op = htons(ARP_OP_REQUEST);
+	arp.hdr.op = hton16(ARP_OP_REQUEST);
 	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
 	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
 	memset(&arp.tha, 0, ETHERNET_ADDR_LEN);
@@ -166,11 +167,11 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet
 	if (!tha || !tpa) {
 		goto ERROR;
 	}
-	arp.hdr.hrd = htons(ARP_HRD_ETHERNET);
-	arp.hdr.pro = htons(ETHERNET_TYPE_IP);
+	arp.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+	arp.hdr.pro = hton16(ETHERNET_TYPE_IP);
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
-	arp.hdr.op = htons(ARP_OP_REPLY);
+	arp.hdr.op = hton16(ARP_OP_REPLY);
 	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
 	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
 	memcpy(&arp.tha, tha, ETHERNET_ADDR_LEN);
@@ -188,11 +189,11 @@ int
 arp_send_garp (void) {
 	struct arp arp;
 
-	arp.hdr.hrd = htons(ARP_HRD_ETHERNET);
-	arp.hdr.pro = htons(ETHERNET_TYPE_IP);
+	arp.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+	arp.hdr.pro = hton16(ETHERNET_TYPE_IP);
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
-	arp.hdr.op = htons(ARP_OP_REQUEST);
+	arp.hdr.op = hton16(ARP_OP_REQUEST);
 	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
 	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
 	memcpy(&arp.tha, ethernet_get_addr(), ETHERNET_ADDR_LEN);

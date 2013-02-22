@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <arpa/inet.h>
 
 void
 hexdump (FILE *fp, void *data, size_t size) {
@@ -90,6 +91,27 @@ queue_pop (struct queue_head *queue) {
 	queue->num--;
 	return entry;
 }
+
+uint16_t
+hton16 (uint16_t h) {
+	return htons(h);
+}
+
+uint16_t
+ntoh16 (uint16_t n) {
+	return ntohs(n);
+}
+
+uint32_t
+hton32 (uint32_t h) {
+	return htonl(h);
+}
+
+uint32_t
+ntoh32 (uint32_t n) {
+	return ntohl(n);
+}
+
 /*
 void
 bitmap_set_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {

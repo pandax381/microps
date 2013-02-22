@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include "ethernet.h"
 #include "device.h"
+#include "util.h"
 
 #define ETHERNET_HANDLER_TABLE_SIZE 16
 
@@ -54,7 +55,7 @@ ethernet_add_handler (uint16_t type, __ethernet_handler_t handler) {
 	if (g_ethernet.handler_num >= ETHERNET_HANDLER_TABLE_SIZE) {
 		return -1;
 	}
-	g_ethernet.handler_table[g_ethernet.handler_num].type = htons(type);
+	g_ethernet.handler_table[g_ethernet.handler_num].type = hton16(type);
 	g_ethernet.handler_table[g_ethernet.handler_num].handler = handler;
 	g_ethernet.handler_num++;
 	return 0;
@@ -99,7 +100,7 @@ ethernet_send (uint16_t type, const uint8_t *payload, size_t plen, const etherne
 	hdr = (struct ethernet_hdr *)&frame;
 	memcpy(hdr->dst.addr, dst->addr, ETHERNET_ADDR_LEN);
 	memcpy(hdr->src.addr, g_ethernet.addr.addr, ETHERNET_ADDR_LEN);
-	hdr->type = htons(type);
+	hdr->type = hton16(type);
 	memcpy(hdr + 1, payload, plen);
 	flen = sizeof(struct ethernet_hdr) + (plen < ETHERNET_PAYLOAD_SIZE_MIN ? ETHERNET_PAYLOAD_SIZE_MIN : plen);
 	return device_write(frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;

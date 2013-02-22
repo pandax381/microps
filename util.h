@@ -26,5 +26,13 @@ extern struct queue_entry *
 queue_push (struct queue_head *queue, void *data, size_t size);
 extern struct queue_entry *
 queue_pop (struct queue_head *queue);
+extern uint16_t
+hton16 (uint16_t h);
+extern uint16_t
+ntoh16 (uint16_t n);
+extern uint32_t
+hton32 (uint32_t h);
+extern uint32_t
+ntoh32 (uint32_t n);
 
 #endif

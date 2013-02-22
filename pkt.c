@@ -11,6 +11,7 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 #include "device.h"
+#include "util.h"
 
 struct {
 	int fd;  
@@ -29,7 +30,7 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	int err;
 
 	g_device.thread = pthread_self();
-	if ((g_device.fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
+	if ((g_device.fd = socket(PF_PACKET, SOCK_RAW, hton16(ETH_P_ALL))) == -1) {
 		perror("socket");
 		goto ERROR;
 	}
@@ -40,7 +41,7 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	}
 	memset(&sockaddr, 0x00, sizeof(sockaddr));
 	sockaddr.sll_family = AF_PACKET;
-	sockaddr.sll_protocol = htons(ETH_P_ALL);
+	sockaddr.sll_protocol = hton16(ETH_P_ALL);
 	sockaddr.sll_ifindex = ifr.ifr_ifindex;
 	if (bind(g_device.fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
 		perror("bind");

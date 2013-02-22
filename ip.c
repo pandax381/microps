@@ -95,7 +95,7 @@ ip_recv (uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst
 		return;
 	}
 	hlen = (hdr->vhl & 0x0f) << 2;
-	if (dlen < hlen || dlen < ntohs(hdr->len)) {
+	if (dlen < hlen || dlen < ntoh16(hdr->len)) {
 		fprintf(stderr, "ip packet length error.\n");
 		return;
 	}
@@ -109,8 +109,8 @@ ip_recv (uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst
 		}
 	}
 	payload = (uint8_t *)(hdr + 1);
-	plen = ntohs(hdr->len) - sizeof(struct ip_hdr);
-	offset = ntohs(hdr->offset);
+	plen = ntoh16(hdr->len) - sizeof(struct ip_hdr);
+	offset = ntoh16(hdr->offset);
 	if (offset & 0x2000 || offset & 0x1fff) {
 		ip_recv_fragment(hdr, payload, plen);
 	} else {
@@ -128,7 +128,7 @@ ip_recv_fragment (struct ip_hdr *hdr, uint8_t *payload, size_t plen) {
 	uint16_t offset;
 	int index, stock = 0;
 
-	offset = (ntohs(hdr->offset) & 0x1fff) << 3;
+	offset = (ntoh16(hdr->offset) & 0x1fff) << 3;
 	for (index = 0; index < IP_FRAGMENT_STOCK_SIZE; index++) {
 		if (g_ip.fragment_stock[index].id == hdr->id && g_ip.fragment_stock[index].protocol == hdr->protocol) {
 			if (ip_addr_cmp(&g_ip.fragment_stock[index].src, &hdr->src) == 0) {
@@ -151,7 +151,7 @@ ip_recv_fragment (struct ip_hdr *hdr, uint8_t *payload, size_t plen) {
 		memcpy(g_ip.fragment_stock[index].payload + offset, payload, plen);
 		memset(g_ip.fragment_stock[index].check + offset, 1, plen);
 	}
-	if ((ntohs(hdr->offset) & 0x2000) == 0) {
+	if ((ntoh16(hdr->offset) & 0x2000) == 0) {
 		g_ip.fragment_stock[index].len = offset + plen;
 	}
 	if (g_ip.fragment_stock[index].len == 0) {
@@ -221,9 +221,9 @@ ip_send_core (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t 
 	hlen = sizeof(struct ip_hdr);
 	hdr->vhl = (IP_VERSION_IPV4 << 4) | (hlen >> 2);
 	hdr->tos = 0;
-	hdr->len = htons(hlen + len);
-	hdr->id = htons(id);
-	hdr->offset = htons(offset);
+	hdr->len = hton16(hlen + len);
+	hdr->id = hton16(id);
+	hdr->offset = hton16(offset);
 	hdr->ttl = 0xff;
 	hdr->protocol = protocol;
 	hdr->sum = 0;
