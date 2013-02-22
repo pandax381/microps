@@ -3,6 +3,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <signal.h>
+#include <arpa/inet.h>
 #include "arp.h"
 
 #define ARP_HRD_ETHERNET 0x0001

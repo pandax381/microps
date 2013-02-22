@@ -19,17 +19,21 @@ struct {
 	__device_interrupt_handler_t handler;
 } g_device;
 
+static void *
+device_reader_thread (void *arg);
+
 int
 device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	struct ifreq ifr;
 	struct sockaddr_ll sockaddr;
+	int err;
 
 	g_device.thread = pthread_self();
 	if ((g_device.fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL))) == -1) {
 		perror("socket");
 		goto ERROR;
 	}
-	strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+	strncpy(ifr.ifr_name, device_name, IFNAMSIZ - 1);
 	if (ioctl(g_device.fd, SIOCGIFINDEX, &ifr) == -1) {
 		perror("ioctl [SIOCGIFINDEX]");
 		goto ERROR;
@@ -49,6 +53,11 @@ device_init (const char *device_name, __device_interrupt_handler_t handler) {
 	ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC;
 	if (ioctl(g_device.fd, SIOCSIFFLAGS, &ifr) == -1) {
 		perror("ioctl [SIOCSIFFLAGS]");
+		goto ERROR;
+	}
+	g_device.handler = handler;
+	if ((err = pthread_create(&g_device.thread, NULL, device_reader_thread, NULL)) != 0) {
+		fprintf(stderr, "pthread_create: error.\n");
 		goto ERROR;
 	}
 	return  0;

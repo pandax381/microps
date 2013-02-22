@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <sys/queue.h>
+#include <arpa/inet.h>
 
 #define UDP_PORT_TABLE_SIZE 65536
 #define UDP_PORT_DINAMIC_MIN 49152
