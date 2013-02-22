@@ -73,6 +73,9 @@ udp_api_open (const char *port) {
 			return NULL;
 		}
 		dsc->used = 1;
+		dsc->queue.next = NULL;
+		dsc->queue.tail = NULL;
+		dsc->queue.num = 0;
 		pthread_mutex_unlock(&dsc->mutex);
 		return dsc;
 	}
@@ -159,11 +162,15 @@ udp_recv (uint8_t *dgram, size_t dlen, ip_addr_t *src, ip_addr_t *dst) {
 	pthread_mutex_lock(&dsc->mutex);
 	if (dsc->used) {
 		data = malloc(sizeof(struct udp_queue_hdr) + (dlen - sizeof(struct udp_hdr)));
+		if (!data) {
+			pthread_mutex_unlock(&dsc->mutex);
+			return;
+		}
 		queue_hdr = data;
 		queue_hdr->addr = *src;
 		queue_hdr->port = ntohs(hdr->sport);
 		queue_hdr->len = dlen - sizeof(struct udp_hdr);
-		memcpy(queue_hdr + 1, hdr + 1, sizeof(struct udp_queue_hdr) + (dlen - sizeof(struct udp_hdr)));
+		memcpy(queue_hdr + 1, hdr + 1, dlen - sizeof(struct udp_hdr));
 		queue_push(&dsc->queue, data, sizeof(struct udp_queue_hdr) + (dlen - sizeof(struct udp_hdr)));
 		pthread_cond_signal(&dsc->cond);
 	} else {

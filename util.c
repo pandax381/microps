@@ -84,7 +84,7 @@ queue_pop (struct queue_head *queue) {
 	}
 	entry = queue->next;
 	queue->next = entry->next;
-	if (!entry->next) {
+	if (!queue->next) {
 		queue->tail = NULL;
 	}
 	queue->num--;
