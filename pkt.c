@@ -16,12 +16,12 @@ struct {
 	int soc;
 	int terminate;
 	pthread_t thread;
-	__device_interrupt_handler_t handler;
+	__device_handler_t handler;
 } g_device;
 
 void
 device_init (void) {
-    g_device.bpf = -1;
+    g_device.soc = -1;
     g_device.terminate = 0;
     g_device.thread = pthread_self();
     g_device.handler = NULL;
@@ -31,7 +31,6 @@ int
 device_open (const char *device_name) {
 	struct ifreq ifr;
 	struct sockaddr_ll sockaddr;
-	int err;
 
 	if ((g_device.soc = socket(PF_PACKET, SOCK_RAW, hton16(ETH_P_ALL))) == -1) {
 		perror("socket");
