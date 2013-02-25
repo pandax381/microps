@@ -31,7 +31,7 @@ extern const ethernet_addr_t ETHERNET_ADDR_BCAST;
 extern void
 ethernet_init (void);
 extern ethernet_addr_t *
-ethernet_get_addr (void);
+ethernet_get_addr (ethernet_addr_t *dst);
 extern int
 ethernet_set_addr (const char *addr);
 extern int

@@ -146,8 +146,8 @@ arp_send_request (const ip_addr_t *tpa) {
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
 	arp.hdr.op = hton16(ARP_OP_REQUEST);
-	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
-	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
+    ethernet_get_addr(&arp.sha);
+    ip_get_addr(&arp.spa);
 	memset(&arp.tha, 0, ETHERNET_ADDR_LEN);
 	memcpy(&arp.tpa, tpa, IP_ADDR_LEN);
 	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), &ETHERNET_ADDR_BCAST) < 0) {
@@ -171,8 +171,8 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
 	arp.hdr.op = hton16(ARP_OP_REPLY);
-	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
-	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
+    ethernet_get_addr(&arp.sha);
+    ip_get_addr(&arp.spa);
 	memcpy(&arp.tha, tha, ETHERNET_ADDR_LEN);
 	memcpy(&arp.tpa, tpa, IP_ADDR_LEN);
 	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), dst) < 0) {
@@ -193,10 +193,10 @@ arp_send_garp (void) {
 	arp.hdr.hln = 6;
 	arp.hdr.pln = 4;
 	arp.hdr.op = hton16(ARP_OP_REQUEST);
-	memcpy(&arp.sha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
-	memcpy(&arp.spa, ip_get_addr(), IP_ADDR_LEN);
-	memcpy(&arp.tha, ethernet_get_addr(), ETHERNET_ADDR_LEN);
-	memcpy(&arp.tpa, ip_get_addr(), IP_ADDR_LEN);
+    ethernet_get_addr(&arp.sha);
+    ip_get_addr(&arp.spa);
+    ethernet_get_addr(&arp.tha);
+    ip_get_addr(&arp.tpa);
 	if (ethernet_send(ETHERNET_TYPE_ARP, (uint8_t *)&arp, sizeof(arp), &ETHERNET_ADDR_BCAST) < 0) {
 		goto ERROR;
 	}

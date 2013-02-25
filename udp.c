@@ -180,7 +180,7 @@ udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16
 	char packet[65536];
 	struct udp_hdr *hdr;
 	uint32_t pseudo = 0;
-	ip_addr_t *self;
+	ip_addr_t self;
 
 	hdr = (struct udp_hdr *)packet;
 	hdr->sport = hton16(dsc->port);
@@ -188,9 +188,9 @@ udp_send (struct udp_dsc *dsc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16
 	hdr->len = hton16(sizeof(struct udp_hdr) + len);
 	hdr->sum = 0;
 	memcpy(hdr + 1, buf, len);
-	self = ip_get_addr();
-	pseudo += (*self >> 16) & 0xffff;
-	pseudo += *self & 0xffff;
+	ip_get_addr(&self);
+	pseudo += (self >> 16) & 0xffff;
+	pseudo += self & 0xffff;
 	pseudo += (*peer >> 16) & 0xffff;
 	pseudo += *peer & 0xffff;
 	pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);

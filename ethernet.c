@@ -3,7 +3,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <pthread.h>
-#include <signal.h>
 #include <arpa/inet.h>
 #include "ethernet.h"
 #include "device.h"
@@ -41,8 +40,8 @@ ethernet_init (void) {
 }
 
 ethernet_addr_t *
-ethernet_get_addr (void) {
-	return &g_ethernet.addr;
+ethernet_get_addr (ethernet_addr_t *dst) {
+    return memcpy(dst, &g_ethernet.addr, sizeof(ethernet_addr_t));
 }
 
 int
@@ -157,14 +156,14 @@ ethernet_addr_isself (const ethernet_addr_t *addr) {
 }
 
 #ifdef _ETHERNET_UNIT_TEST
-
+#include <signal.h>
 #include "util.h"
 
 static void
 arp_recv(uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
 	char ss[ETHERNET_ADDR_STR_LEN + 1], ds[ETHERNET_ADDR_STR_LEN + 1];
 
-	fprintf(stderr, "%s > %s ARP length: %lu\n",
+	fprintf(stderr, "%s > %s [ARP] length: %lu\n",
 		ethernet_addr_ntop(src, ss, sizeof(ss)), ethernet_addr_ntop(dst, ds, sizeof(ds)), plen);
 	hexdump(stderr, packet, plen);
 }
@@ -173,7 +172,7 @@ static void
 ip_recv(uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst) {
 	char ss[ETHERNET_ADDR_STR_LEN + 1], ds[ETHERNET_ADDR_STR_LEN + 1];
 
-	fprintf(stderr, "%s > %s IP  length: %lu\n",
+	fprintf(stderr, "%s > %s [IP] length: %lu\n",
 		ethernet_addr_ntop(src, ss, sizeof(ss)), ethernet_addr_ntop(dst, ds, sizeof(ds)), dlen);
 	hexdump(stderr, dgram, dlen);
 }
@@ -185,27 +184,30 @@ main (int argc, char *argv[]) {
 
 	if (argc != 3) {
 		fprintf(stderr, "usage: %s device-name ethernet-addr\n", argv[0]);
-		goto ERROR;
+        return -1;
 	}
 	sigemptyset(&sigset);
 	sigaddset(&sigset, SIGINT);
 	sigprocmask(SIG_BLOCK, &sigset, NULL);
+    device_init();
+    if (device_open(argv[1]) == -1) {
+        return -1;
+    }
+    device_set_handler(ethernet_recv);
 	ethernet_init();
 	if (ethernet_set_addr(argv[2]) == -1) {
-		fprintf(stderr, "error: ethernet-addr is invalid\n");
-		goto ERROR;
+        device_close();
+        return -1;
 	}
 	ethernet_add_handler(ETHERNET_TYPE_ARP, arp_recv);
 	ethernet_add_handler(ETHERNET_TYPE_IP, ip_recv);
-	if (device_init(argv[1], ethernet_recv) == -1) {
-		goto ERROR;
+	if (device_dispatch() == -1) {
+        device_close();
+        return -1;
 	}
 	sigwait(&sigset, &signo);
-	device_cleanup();
-	return  0;
-
-ERROR:
-	return -1;
+	device_close();
+	return 0;
 }
 
 #endif

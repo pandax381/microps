@@ -44,8 +44,8 @@ static ssize_t
 ip_send_core (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst, uint16_t id, uint16_t offset);
 
 ip_addr_t *
-ip_get_addr (void) {
-	return &g_ip.addr;
+ip_get_addr (ip_addr_t *dst) {
+    return memcpy(dst, &g_ip.addr, sizeof(ip_addr_t));
 }
 
 int

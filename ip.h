@@ -35,7 +35,7 @@ struct ip_hdr {
 typedef void (*__ip_handler_t)(uint8_t *, size_t, ip_addr_t *, ip_addr_t *);
 
 extern ip_addr_t *
-ip_get_addr (void);
+ip_get_addr (ip_addr_t *dst);
 extern int
 ip_set_addr (const char *addr, const char *mask);
 extern int
