@@ -8,8 +8,16 @@
 #include "icmp.h"
 #include "udp.h"
 
+struct microps_param {
+    char *ethernet_device;
+    char *ethernet_addr;
+    char *ip_addr;
+    char *ip_netmask;
+    char *ip_gateway;
+};
+
 extern int
-microps_init (const char *device_name, const char *ethernet_addr, const char *ip_addr, const char *netmask, const char *gw);
+microps_init (const struct microps_param *param);
 extern void
 microps_cleanup (void);
 

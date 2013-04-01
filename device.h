@@ -6,19 +6,15 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 
-typedef void (*__device_handler_t)(uint8_t *, size_t);
+typedef struct device_fd device_fd_t;
 
+extern device_fd_t *
+device_open (const char *name);
 extern void
-device_init (void);
-extern int
-device_open (const char *device_name);
+device_close (device_fd_t *devfd);
 extern void
-device_close (void);
-extern void
-device_set_handler (__device_handler_t handler);
-extern int
-device_dispatch (void);
+device_input (device_fd_t *devfd, void (*callback)(uint8_t *, size_t), int timeout);
 extern ssize_t
-device_write (const uint8_t *buf, size_t len);
+device_output (device_fd_t *devfd, const uint8_t *buffer, size_t len);
 
 #endif
