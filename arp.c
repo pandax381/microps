@@ -14,7 +14,7 @@
 #define ARP_OP_REPLY   2
 
 #define ARP_TABLE_SIZE 4096
-#define ARP_LOOKUP_TIMEOUT_SEC 3
+#define ARP_LOOKUP_TIMEOUT_SEC 1
 
 struct arp_hdr {
 	uint16_t hrd;

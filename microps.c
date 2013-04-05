@@ -22,6 +22,9 @@ microps_init (const struct microps_param *param) {
 	if (udp_init() == -1) {
         goto ERROR;
     }
+	if (tcp_init() == -1) {
+        goto ERROR;
+    }
     if (ethernet_device_run() == -1) {
         goto ERROR;        
     }

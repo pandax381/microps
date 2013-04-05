@@ -1,6 +1,6 @@
 PROGRAM = echo_server
 
-OBJECTS = microps.o udp.o icmp.o ip.o arp.o ethernet.o util.o
+OBJECTS = microps.o tcp.o udp.o icmp.o ip.o arp.o ethernet.o util.o
 
 CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter
 

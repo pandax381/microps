@@ -23,34 +23,43 @@ struct microps_param param = {
 
 int
 main (int argc, char *argv[]) {
-	int soc;
+	int soc, acc;
 	uint8_t buf[65536];
-	ip_addr_t peer_addr;
-	uint16_t peer_port;
 	ssize_t len;
 
 	microps_init(&param);
-	soc = udp_api_open();
+	soc = tcp_api_open();
     if (soc == -1) {
+fprintf(stderr, "err1\n");
         microps_cleanup();
         return -1;
 	}
-    if (udp_api_bind(soc, 7) == -1) {
-fprintf(stderr, "error\n");
-        udp_api_close(soc);
+    if (tcp_api_bind(soc, 7) == -1) {
+fprintf(stderr, "err2\n");
+        tcp_api_close(soc);
         microps_cleanup();
         return -1;
     }
+    tcp_api_listen(soc);
+    acc = tcp_api_accept(soc);
+    if (acc == -1) {
+fprintf(stderr, "err3\n");
+        tcp_api_close(soc);
+        microps_cleanup();
+        return -1;
+    }
+fprintf(stderr, "accept success, soc=%d, acc=%d\n", soc, acc);
 	while (1) {
-		len = udp_api_recv(soc, buf, sizeof(buf), &peer_addr, &peer_port);
-		if (len < 0) {
+		len = tcp_api_recv(acc, buf, sizeof(buf));
+fprintf(stderr, "tcp_api_recv(): %ld\n", len);
+		if (len <= 0) {
 			break;
 		}
-		fprintf(stderr, "udp_api_recv(): %ld\n", len);
 		hexdump(stderr, buf, len);
-		udp_api_send(soc, buf, len, &peer_addr, peer_port);
+		tcp_api_send(acc, buf, len);
 	}
-	udp_api_close(soc);
+	tcp_api_close(acc);
+	tcp_api_close(soc);
 	microps_cleanup();
     return  0;
 }

@@ -7,6 +7,7 @@
 #include "arp.h"
 #include "icmp.h"
 #include "udp.h"
+#include "tcp.h"
 
 struct microps_param {
     char *ethernet_device;
