@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include "ip.h"
 
 extern int
 tcp_init (void);
@@ -7,6 +8,8 @@ extern int
 tcp_api_open (void);
 extern int
 tcp_api_close (int soc);
+extern int
+tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port);
 extern int
 tcp_api_bind (int soc, uint16_t port);
 extern int
