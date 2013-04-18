@@ -29,7 +29,6 @@ microps_init (const struct microps_param *param) {
         goto ERROR;        
     }
 	return  0;
-
 ERROR:
     microps_cleanup();
 	return -1;

@@ -12,7 +12,6 @@
 #define ARP_HRD_ETHERNET 0x0001
 #define ARP_OP_REQUEST 1
 #define ARP_OP_REPLY   2
-
 #define ARP_TABLE_SIZE 4096
 #define ARP_LOOKUP_TIMEOUT_SEC 1
 
@@ -197,7 +196,6 @@ arp_send_request (const ip_addr_t *tpa) {
 		goto ERROR;
 	}
 	return  0;
-
 ERROR:
 	return -1;
 }
@@ -222,7 +220,6 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet
 		goto ERROR;
 	}
 	return  0;
-
 ERROR:
 	return -1;
 }

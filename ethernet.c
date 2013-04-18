@@ -9,7 +9,6 @@
 #include "util.h"
 
 #define ETHERNET_PROTOCOL_TABLE_SIZE 8
-#define BPF_DEVICE_NUM 4
 
 struct ethernet_hdr {
 	ethernet_addr_t dst;
@@ -17,11 +16,9 @@ struct ethernet_hdr {
 	uint16_t type;
 } __attribute__ ((packed));
 
-const ethernet_addr_t ETHERNET_ADDR_BCAST = {"\xff\xff\xff\xff\xff\xff"};
-
 static struct {
     ethernet_addr_t addr;
-    device_fd_t *devfd;
+    device_t *device;
     int terminate;
     pthread_t thread;
 	struct {
@@ -29,6 +26,8 @@ static struct {
 		__ethernet_protocol_handler_t handler;
 	} protocol[ETHERNET_PROTOCOL_TABLE_SIZE];
 } ethernet;
+
+const ethernet_addr_t ETHERNET_ADDR_BCAST = {"\xff\xff\xff\xff\xff\xff"};
 
 int
 ethernet_addr_pton (const char *p, ethernet_addr_t *n) {
@@ -72,7 +71,7 @@ ethernet_init (void) {
 	int index;
 
     memset(&ethernet.addr, 0, sizeof(ethernet.addr));
-    ethernet.devfd = NULL;
+    ethernet.device = NULL;
     ethernet.terminate = 0;
     ethernet.thread = pthread_self();
 	for (index = 0; index < ETHERNET_PROTOCOL_TABLE_SIZE; index++) {
@@ -121,8 +120,7 @@ ethernet_input (uint8_t *frame, size_t flen) {
 	plen = flen - sizeof(struct ethernet_hdr);
 	for (index = 0; index < ETHERNET_PROTOCOL_TABLE_SIZE; index++) {
 		if (ethernet.protocol[index].type == hdr->type) {
-			ethernet.protocol[index].handler(payload, plen, &hdr->src, &hdr->dst);
-			break;
+			return ethernet.protocol[index].handler(payload, plen, &hdr->src, &hdr->dst);
 		}
 	}
 }
@@ -136,14 +134,14 @@ ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const ether
 	if (!payload || plen > ETHERNET_PAYLOAD_SIZE_MAX || !dst) {
 		return -1;
 	}
-	memset(&frame, 0x00, sizeof(frame));
-	hdr = (struct ethernet_hdr *)&frame;
+	memset(frame, 0, sizeof(frame));
+	hdr = (struct ethernet_hdr *)frame;
 	memcpy(hdr->dst.addr, dst->addr, ETHERNET_ADDR_LEN);
 	memcpy(hdr->src.addr, ethernet.addr.addr, ETHERNET_ADDR_LEN);
 	hdr->type = hton16(type);
 	memcpy(hdr + 1, payload, plen);
 	flen = sizeof(struct ethernet_hdr) + (plen < ETHERNET_PAYLOAD_SIZE_MIN ? ETHERNET_PAYLOAD_SIZE_MIN : plen);
-	return device_output(ethernet.devfd, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
+	return device_output(ethernet.device, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
 }
 
 int
@@ -151,7 +149,7 @@ ethernet_device_open (const char *name, const char *addr) {
 	if (ethernet_addr_pton(addr, &ethernet.addr) == -1) {
         return -1;
     }
-    if ((ethernet.devfd = device_open(name)) == NULL) {
+    if ((ethernet.device = device_open(name)) == NULL) {
         return -1;
     }
     return 0;
@@ -159,20 +157,20 @@ ethernet_device_open (const char *name, const char *addr) {
 
 void
 ethernet_device_close (void) {
-    if (pthread_equal(ethernet.thread, pthread_self()) == 0) {
+    if (!pthread_equal(ethernet.thread, pthread_self())) {
         ethernet.terminate = 1;
         pthread_join(ethernet.thread, NULL);
     }
-    device_close(ethernet.devfd);
+    device_close(ethernet.device);
 }
 
 void *
 ethernet_device_input_thread (void *arg) {
-    device_fd_t *devfd;
+    device_t *device;
 
-    devfd = (device_fd_t *)arg;
+    device = (device_t *)arg;
     while (!ethernet.terminate) {
-        device_input(devfd, ethernet_input, 1000);
+        device_input(device, ethernet_input, 1000);
     }
     return NULL;
 }
@@ -181,7 +179,7 @@ int
 ethernet_device_run (void) {
     int err;
 
-    if ((err = pthread_create(&ethernet.thread, NULL, ethernet_device_input_thread, ethernet.devfd)) != 0) {
+    if ((err = pthread_create(&ethernet.thread, NULL, ethernet_device_input_thread, ethernet.device)) != 0) {
         fprintf(stderr, "pthread_create: error, code=%d\n", err);
         return -1;
     }

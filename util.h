@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <sys/types.h>
 
+#define sizeof_member(s, m) sizeof(((s *)NULL)->m)
+
 struct queue_entry {
 	void *data;
 	size_t size;

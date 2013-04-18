@@ -1,121 +1,121 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <errno.h>
-#include <pthread.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <unistd.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <net/bpf.h>
 #include <net/if.h>
-#include <poll.h>
 #include "device.h"
 #include "util.h"
 
 #define BPF_DEVICE_NUM 4
 
-struct device_fd {
+struct device {
     int fd;
     int buffer_size;
     char *buffer;
 };
 
-device_fd_t *
+device_t *
 device_open (const char *name) {
-    device_fd_t *devfd;
+    device_t *device;
 	int index, enable = 1;
 	char dev[16];
 	struct ifreq ifr;
 
-    if ((devfd = malloc(sizeof(*devfd))) == NULL) {
+    if ((device = malloc(sizeof(device_t))) == NULL) {
         perror("malloc");
         goto ERROR;
     }
-    devfd->fd = -1;
-    devfd->buffer = NULL;
+    device->fd = -1;
+    device->buffer_size = 0;
+    device->buffer = NULL;
 	for (index = 0; index < BPF_DEVICE_NUM; index++) {
 		snprintf(dev, sizeof(dev), "/dev/bpf%d", index);
-		if ((devfd->fd = open(dev, O_RDWR, 0)) != -1) {
+		if ((device->fd = open(dev, O_RDWR, 0)) != -1) {
 			break;
 		}
 	}
-	if (devfd->fd == -1) {
+	if (device->fd == -1) {
 		perror("open");
 		goto ERROR;
 	}
 	strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
-	if (ioctl(devfd->fd, BIOCSETIF, &ifr) == -1) {
+	if (ioctl(device->fd, BIOCSETIF, &ifr) == -1) {
 		perror("ioctl [BIOCSETIF]");
 		goto ERROR;
 	}
-    if (ioctl(devfd->fd, BIOCGBLEN, &devfd->buffer_size) == -1) {
+    if (ioctl(device->fd, BIOCGBLEN, &device->buffer_size) == -1) {
         perror("ioctl [BIOCGBLEN]");
         goto ERROR;
     }
-    if ((devfd->buffer = malloc(devfd->buffer_size)) == NULL) {
+    if ((device->buffer = malloc(device->buffer_size)) == NULL) {
         perror("malloc");
         goto ERROR;
     }
-	if (ioctl(devfd->fd, BIOCPROMISC, NULL) == -1) {
+	if (ioctl(device->fd, BIOCPROMISC, NULL) == -1) {
 		perror("ioctl [BIOCPROMISC]");
 		goto ERROR;
 	}
-	if (ioctl(devfd->fd, BIOCSSEESENT, &enable) == -1) {
+	if (ioctl(device->fd, BIOCSSEESENT, &enable) == -1) {
 		perror("ioctl [BIOCSSEESENT]");
 		goto ERROR;
 	}
-	if (ioctl(devfd->fd, BIOCIMMEDIATE, &enable) == -1) {
+	if (ioctl(device->fd, BIOCIMMEDIATE, &enable) == -1) {
 		perror("ioctl [BIOCIMMEDIATE]");
 		goto ERROR;
 	}
-	if (ioctl(devfd->fd, BIOCSHDRCMPLT, &enable) == -1) {
+	if (ioctl(device->fd, BIOCSHDRCMPLT, &enable) == -1) {
 		perror("ioctl [BIOCSHDRCMPLT]");
 		goto ERROR;
 	}
-	return devfd;
+	return device;
 ERROR:
-    if (devfd) {
-        device_close(devfd);
+    if (device) {
+        device_close(device);
     }
 	return NULL;
 }
 
 void
-device_close (device_fd_t *devfd) {
-    if (devfd->fd != -1) {
-        close(devfd->fd);
+device_close (device_t *device) {
+    if (device->fd != -1) {
+        close(device->fd);
+        device->fd = -1;
     }
-    free(devfd->buffer);
+    free(device->buffer);
+    free(device);
 }
 
 void
-device_input (device_fd_t *devfd, void (*callback)(uint8_t *, size_t), int timeout) {
-    struct pollfd pollfd;
-    ssize_t ret, length;
+device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout) {
+    struct pollfd pfd;
+    ssize_t length;
     struct bpf_hdr *hdr;
 
-    pollfd.fd = devfd->fd;
-    pollfd.events = POLLIN;
-    ret = poll(&pollfd, 1, timeout);
-    if (ret <= 0) {
+    pfd.fd = device->fd;
+    pfd.events = POLLIN;
+    if (poll(&pfd, 1, timeout) <= 0) {
         return;
     }
-    length = read(devfd->fd, devfd->buffer, devfd->buffer_size);
+    length = read(device->fd, device->buffer, device->buffer_size);
     if (length <= 0) {
         return;
     }
-    hdr = (struct bpf_hdr *)devfd->buffer;
-    while ((caddr_t)hdr < (caddr_t)devfd->buffer + length) {
+    hdr = (struct bpf_hdr *)device->buffer;
+    while ((caddr_t)hdr < (caddr_t)device->buffer + length) {
         callback((uint8_t *)((caddr_t)hdr + hdr->bh_hdrlen), hdr->bh_caplen);
         hdr = (struct bpf_hdr *)((caddr_t)hdr + BPF_WORDALIGN(hdr->bh_hdrlen + hdr->bh_caplen));
     }
 }
 
 ssize_t
-device_output (device_fd_t *devfd, const uint8_t *buffer, size_t len) {
-	return write(devfd->fd, buffer, len);
+device_output (device_t *device, const uint8_t *buffer, size_t length) {
+	return write(device->fd, buffer, length);
 }
