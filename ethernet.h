@@ -24,8 +24,6 @@ typedef struct {
 	uint8_t addr[ETHERNET_ADDR_LEN];
 } __attribute__ ((packed)) ethernet_addr_t;
 
-typedef void (*__ethernet_protocol_handler_t)(uint8_t *, size_t, ethernet_addr_t *src, ethernet_addr_t *dst);
-
 extern const ethernet_addr_t ETHERNET_ADDR_BCAST;
 
 extern int
@@ -37,7 +35,7 @@ ethernet_init (void);
 extern ethernet_addr_t *
 ethernet_get_addr (ethernet_addr_t *dst);
 extern int
-ethernet_add_protocol (uint16_t type, __ethernet_protocol_handler_t handler);
+ethernet_add_protocol (uint16_t type, void (*callback)(uint8_t *, size_t, ethernet_addr_t *, ethernet_addr_t *));
 extern void
 ethernet_input (uint8_t *frame, size_t flen);
 extern ssize_t

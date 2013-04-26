@@ -3,9 +3,10 @@
 #include <string.h>
 #include <pthread.h>
 #include <signal.h>
-#include <arpa/inet.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/time.h>
+#include <arpa/inet.h>
 #include "arp.h"
 #include "util.h"
 
@@ -34,11 +35,13 @@ struct arp_ethernet {
 struct arp_entry {
     ip_addr_t pa;
     ethernet_addr_t ha;
+    time_t timestamp;
     pthread_cond_t cond;
     struct arp_entry *next;
 };
 
 static struct {
+    time_t timestamp;
     struct {
         struct arp_entry table[ARP_TABLE_SIZE];
         struct arp_entry *head;
@@ -47,100 +50,150 @@ static struct {
     pthread_mutex_t mutex;
 } arp;
 
-static int
-arp_send_request (const ip_addr_t *tpa);
-static int
-arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst);
+static void
+arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst);
 
 int
 arp_init (void) {
     int index;
+    struct arp_entry *entry;
 
+    time(&arp.timestamp);
     for (index = 0; index < ARP_TABLE_SIZE; index++) {
-        pthread_cond_init(&arp.table.table[index].cond, NULL);
-        if (index < ARP_TABLE_SIZE - 1) {
-            arp.table.table[index].next = &arp.table.table[index + 1];
-        } else {
-            arp.table.table[index].next = NULL;
-        }
+        entry = arp.table.table + index;
+        entry->pa = 0;
+        entry->timestamp = 0;
+        memset(&entry->ha, 0, sizeof(ethernet_addr_t));
+        pthread_cond_init(&entry->cond, NULL);
+        entry->next = (index != ARP_TABLE_SIZE) ? (entry + 1) : NULL;
     }
     arp.table.head = NULL;
-    arp.table.pool = &arp.table.table[0];
+    arp.table.pool = arp.table.table;
 	pthread_mutex_init(&arp.mutex, NULL);
-    ethernet_add_protocol(ETHERNET_TYPE_ARP, arp_recv);
+    ethernet_add_protocol(ETHERNET_TYPE_ARP, arp_input);
     return 0;
 }
 
-int
-arp_table_lookup (const ip_addr_t *pa, ethernet_addr_t *ha) {
+static int
+arp_table_select (const ip_addr_t *pa, ethernet_addr_t *ha) {
     struct arp_entry *entry;
-    struct timeval tv;
-    struct timespec timeout;
-    int ret;
 
-	pthread_mutex_lock(&arp.mutex);
     for (entry = arp.table.head; entry; entry = entry->next) {
         if (entry->pa == *pa) {
             memcpy(ha, &entry->ha, sizeof(ethernet_addr_t));
-            pthread_mutex_unlock(&arp.mutex);
             return 0;
         }
     }
+    return -1;
+}
+
+static int
+arp_table_update (const ip_addr_t *pa, const ethernet_addr_t *ha) {
+    struct arp_entry *entry;
+
+    for (entry = arp.table.head; entry; entry = entry->next) {
+        if (entry->pa == *pa) {
+            memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
+            time(&entry->timestamp);
+            pthread_cond_broadcast(&entry->cond);
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+arp_table_insert (const ip_addr_t *pa, const ethernet_addr_t *ha) {
+    struct arp_entry *entry;
+
     entry = arp.table.pool;
     if (!entry) {
-        pthread_mutex_unlock(&arp.mutex);
         return -1;
     }
+    entry->pa = *pa;
+    memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
+    time(&entry->timestamp);
     arp.table.pool = entry->next;
     entry->next = arp.table.head;
     arp.table.head = entry;
-    entry->pa = *pa;
-    arp_send_request(pa);
-    gettimeofday(&tv, NULL);
-    timeout.tv_sec = tv.tv_sec + ARP_LOOKUP_TIMEOUT_SEC;
-    timeout.tv_nsec = tv.tv_usec * 1000;
-    do {
-        ret = pthread_cond_timedwait(&entry->cond, &arp.mutex, &timeout);
-        if (ret == ETIMEDOUT) {
-            pthread_mutex_unlock(&arp.mutex);
-            return -1;
-        }
-    } while (ret != 0);
-    memcpy(ha, &entry->ha, sizeof(ethernet_addr_t));
-    pthread_mutex_unlock(&arp.mutex);
+    pthread_cond_broadcast(&entry->cond);
     return 0;
 }
 
-int
-arp_table_update (const ethernet_addr_t *ha, const ip_addr_t *pa) {
-    struct arp_entry *entry;
+static void
+arp_table_check_timeout (void) {
+    struct arp_entry *prev, *entry;
 
-    pthread_mutex_lock(&arp.mutex);
-    for (entry = arp.table.head; entry; entry = entry->next) {
-        if (entry->pa == *pa) {
-			memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
-            pthread_cond_broadcast(&entry->cond);
-            pthread_mutex_unlock(&arp.mutex);
-			return 0;
+    prev = NULL;
+    entry = arp.table.head;
+    while (entry) {
+        if (arp.timestamp - entry->timestamp > 300) {
+            entry->pa = 0;
+            memset(&entry->ha, 0, sizeof(ethernet_addr_t));
+            entry->timestamp = 0;
+            if (prev) {
+                prev->next = entry->next;
+            } else {
+                arp.table.head = entry->next;
+            }
+            entry->next = arp.table.pool;
+            arp.table.pool = entry;
+            entry = prev ? prev->next : arp.table.head;
+        } else {
+            entry = entry->next;
         }
     }
-    entry = arp.table.pool;
-    if (!entry) {
-        pthread_mutex_unlock(&arp.mutex);
+}
+
+static int
+arp_send_request (const ip_addr_t *tpa) {
+	struct arp_ethernet request;
+
+	if (!tpa) {
         return -1;
-    }
-    arp.table.pool = entry->next;
-    entry->next = arp.table.head;
-    arp.table.head = entry;
-    entry->pa = *pa;
-    memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
-	pthread_mutex_unlock(&arp.mutex);
+	}
+	request.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+	request.hdr.pro = hton16(ETHERNET_TYPE_IP);
+	request.hdr.hln = 6;
+	request.hdr.pln = 4;
+	request.hdr.op = hton16(ARP_OP_REQUEST);
+    ethernet_get_addr(&request.sha);
+    ip_get_addr(&request.spa);
+	memset(&request.tha, 0, ETHERNET_ADDR_LEN);
+    request.tpa = *tpa;
+	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), &ETHERNET_ADDR_BCAST) < 0) {
+        return -1;
+	}
+	return  0;
+}
+
+static int
+arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
+	struct arp_ethernet reply;
+
+	if (!tha || !tpa) {
+        return -1;
+	}
+	reply.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+	reply.hdr.pro = hton16(ETHERNET_TYPE_IP);
+	reply.hdr.hln = 6;
+	reply.hdr.pln = 4;
+	reply.hdr.op = hton16(ARP_OP_REPLY);
+    ethernet_get_addr(&reply.sha);
+    ip_get_addr(&reply.spa);
+    reply.tha = *tha;
+    reply.tpa = *tpa;
+	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), dst) < 0) {
+        return -1;
+	}
 	return 0;
 }
 
-void
-arp_recv (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
+static void
+arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
 	struct arp_ethernet *message;
+    time_t timestamp;
+    int marge = 0;
 
 	(void)dst;
 	if (plen < sizeof(struct arp_ethernet)) {
@@ -159,67 +212,60 @@ arp_recv (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *d
     if (message->hdr.pln != IP_ADDR_LEN) {
         return;
     }
-    switch (ntoh16(message->hdr.op)) {
-        case ARP_OP_REQUEST:
-            if (message->tpa == ip_get_addr(NULL)) {
-                arp_send_reply(&message->sha, &message->spa, src);
-            } else if (message->spa != message->tpa) {
-                break;
-            }
-            arp_table_update(&message->sha, &message->spa);
-            break;
-        case ARP_OP_REPLY:
-            if (message->tpa == ip_get_addr(NULL)) {
-                arp_table_update(&message->sha, &message->spa);
-            }
-            break;
+    pthread_mutex_lock(&arp.mutex);
+    time(&timestamp);
+    if (timestamp - arp.timestamp > 10) {
+        arp.timestamp = timestamp;
+        arp_table_check_timeout();
+    }
+    marge = (arp_table_update(&message->spa, &message->sha) == 0) ? 1 : 0;
+    pthread_mutex_unlock(&arp.mutex);
+    if (message->tpa == ip_get_addr(NULL)) {
+        if (!marge) {
+            pthread_mutex_lock(&arp.mutex);
+            arp_table_insert(&message->spa, &message->sha);
+            pthread_mutex_unlock(&arp.mutex);
+        }
+        if (ntoh16(message->hdr.op) == ARP_OP_REQUEST) {
+            arp_send_reply(&message->sha, &message->spa, src);
+        }
     }
 }
 
-static int
-arp_send_request (const ip_addr_t *tpa) {
-	struct arp_ethernet request;
+int
+arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha) {
+    struct arp_entry *entry;
+    struct timeval tv;
+    struct timespec timeout;
+    int ret;
 
-	if (!tpa) {
-		goto ERROR;
-	}
-	request.hdr.hrd = hton16(ARP_HRD_ETHERNET);
-	request.hdr.pro = hton16(ETHERNET_TYPE_IP);
-	request.hdr.hln = 6;
-	request.hdr.pln = 4;
-	request.hdr.op = hton16(ARP_OP_REQUEST);
-    ethernet_get_addr(&request.sha);
-    ip_get_addr(&request.spa);
-	memset(&request.tha, 0, ETHERNET_ADDR_LEN);
-    request.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), &ETHERNET_ADDR_BCAST) < 0) {
-		goto ERROR;
-	}
-	return  0;
-ERROR:
-	return -1;
-}
-
-static int
-arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
-	struct arp_ethernet reply;
-
-	if (!tha || !tpa) {
-		goto ERROR;
-	}
-	reply.hdr.hrd = hton16(ARP_HRD_ETHERNET);
-	reply.hdr.pro = hton16(ETHERNET_TYPE_IP);
-	reply.hdr.hln = 6;
-	reply.hdr.pln = 4;
-	reply.hdr.op = hton16(ARP_OP_REPLY);
-    ethernet_get_addr(&reply.sha);
-    ip_get_addr(&reply.spa);
-    reply.tha = *tha;
-    reply.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), dst) < 0) {
-		goto ERROR;
-	}
-	return  0;
-ERROR:
-	return -1;
+	pthread_mutex_lock(&arp.mutex);
+    if (arp_table_select(pa, ha) == 0) {
+        pthread_mutex_unlock(&arp.mutex);
+        return 0;
+    }
+    entry = arp.table.pool;
+    if (!entry) {
+        pthread_mutex_unlock(&arp.mutex);
+        return -1;
+    }
+    arp.table.pool = entry->next;
+    entry->next = arp.table.head;
+    arp.table.head = entry;
+    entry->pa = *pa;
+    time(&entry->timestamp);
+    arp_send_request(pa);
+    gettimeofday(&tv, NULL);
+    timeout.tv_sec = tv.tv_sec + ARP_LOOKUP_TIMEOUT_SEC;
+    timeout.tv_nsec = tv.tv_usec * 1000;
+    do {
+        ret = pthread_cond_timedwait(&entry->cond, &arp.mutex, &timeout);
+        if (ret == ETIMEDOUT) {
+            pthread_mutex_unlock(&arp.mutex);
+            return -1;
+        }
+    } while (ret != 0);
+    memcpy(ha, &entry->ha, sizeof(ethernet_addr_t));
+    pthread_mutex_unlock(&arp.mutex);
+    return 0;
 }

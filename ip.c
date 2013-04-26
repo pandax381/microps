@@ -293,7 +293,7 @@ ip_send (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst)
 		fprintf(stderr, "route lookup error.\n");
         return -1;
     }
-	if (arp_table_lookup(nexthop ? &nexthop : dst, &dst_ha) == -1) {
+	if (arp_resolve(nexthop ? &nexthop : dst, &dst_ha) == -1) {
 		fprintf(stderr, "arp lookup error.\n");
 		return -1;
 	}
