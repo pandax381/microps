@@ -30,7 +30,7 @@ microps_init (const struct microps_param *param) {
     }
 	return  0;
 ERROR:
-    microps_cleanup();
+    //microps_cleanup();
 	return -1;
 }
 
