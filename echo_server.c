@@ -23,11 +23,13 @@ struct microps_param param = {
 
 int
 main (int argc, char *argv[]) {
-    int soc, acc;
+    int soc = -1, acc;
     uint8_t buf[65536];
     ssize_t len;
 
-    microps_init(&param);
+    if (microps_init(&param) == -1) {
+        goto ERROR;
+    }
     soc = tcp_api_open();
     if (soc == -1) {
         goto ERROR;
