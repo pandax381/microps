@@ -39,6 +39,6 @@ icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst) {
 		hdr->type = ICMP_TYPE_ECHO_REPLY;
 		hdr->sum = 0;
 		hdr->sum = cksum16((uint16_t *)hdr, plen, 0);
-		ip_send(IP_PROTOCOL_ICMP, packet, plen, src);
+		ip_output(IP_PROTOCOL_ICMP, packet, plen, src);
 	}
 }

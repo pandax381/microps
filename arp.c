@@ -37,6 +37,8 @@ struct arp_entry {
     ethernet_addr_t ha;
     time_t timestamp;
     pthread_cond_t cond;
+    void *data;
+    size_t len;
     struct arp_entry *next;
 };
 
@@ -65,6 +67,8 @@ arp_init (void) {
         entry->timestamp = 0;
         memset(&entry->ha, 0, sizeof(ethernet_addr_t));
         pthread_cond_init(&entry->cond, NULL);
+        entry->data = NULL;
+        entry->len = 0;
         entry->next = (index != ARP_TABLE_SIZE) ? (entry + 1) : NULL;
     }
     arp.table.head = NULL;
@@ -96,6 +100,12 @@ arp_table_update (const ip_addr_t *pa, const ethernet_addr_t *ha) {
             memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
             time(&entry->timestamp);
             pthread_cond_broadcast(&entry->cond);
+            if (entry->data) {
+                ethernet_output(ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, NULL, &entry->ha);
+                free(entry->data);
+                entry->data = NULL;
+                entry->len = 0;
+            }
             return 0;
         }
     }
@@ -161,7 +171,7 @@ arp_send_request (const ip_addr_t *tpa) {
     ip_get_addr(&request.spa);
 	memset(&request.tha, 0, ETHERNET_ADDR_LEN);
     request.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), &ETHERNET_ADDR_BCAST) < 0) {
+	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), NULL, &ETHERNET_ADDR_BCAST) < 0) {
         return -1;
 	}
 	return  0;
@@ -183,7 +193,7 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet
     ip_get_addr(&reply.spa);
     reply.tha = *tha;
     reply.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), dst) < 0) {
+	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), NULL, dst) < 0) {
         return -1;
 	}
 	return 0;
@@ -233,39 +243,36 @@ arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *
 }
 
 int
-arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha) {
+arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t len) {
     struct arp_entry *entry;
-    struct timeval tv;
-    struct timespec timeout;
-    int ret;
 
 	pthread_mutex_lock(&arp.mutex);
     if (arp_table_select(pa, ha) == 0) {
         pthread_mutex_unlock(&arp.mutex);
-        return 0;
+        return 1;
+    }
+    if (!data) {
+        pthread_mutex_unlock(&arp.mutex);
+        return -1;
     }
     entry = arp.table.pool;
     if (!entry) {
         pthread_mutex_unlock(&arp.mutex);
         return -1;
     }
+    entry->data = malloc(len);
+    if (!entry->data) {
+        pthread_mutex_unlock(&arp.mutex);
+        return -1;
+    }
+    memcpy(entry->data, data, len);
+    entry->len = len;
     arp.table.pool = entry->next;
     entry->next = arp.table.head;
     arp.table.head = entry;
     entry->pa = *pa;
     time(&entry->timestamp);
     arp_send_request(pa);
-    gettimeofday(&tv, NULL);
-    timeout.tv_sec = tv.tv_sec + ARP_LOOKUP_TIMEOUT_SEC;
-    timeout.tv_nsec = tv.tv_usec * 1000;
-    do {
-        ret = pthread_cond_timedwait(&entry->cond, &arp.mutex, &timeout);
-        if (ret == ETIMEDOUT) {
-            pthread_mutex_unlock(&arp.mutex);
-            return -1;
-        }
-    } while (ret != 0);
-    memcpy(ha, &entry->ha, sizeof(ethernet_addr_t));
     pthread_mutex_unlock(&arp.mutex);
-    return 0;
+    return  0;
 }

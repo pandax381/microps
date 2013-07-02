@@ -1,6 +1,8 @@
 #include "util.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <limits.h>
 #include <ctype.h>
 #include <arpa/inet.h>
 
@@ -112,6 +114,65 @@ ntoh32 (uint32_t n) {
 	return ntohl(n);
 }
 
+void
+maskset (uint32_t *mask, size_t size, size_t offset, size_t len) {
+    size_t idx, so, sb, bl;
+
+    so = offset / 32;
+    sb = offset % 32;
+    bl = (len > 32 - sb) ? 32 - sb : len;
+    mask[so] |= (0xffffffff >> (32 - bl)) << sb;
+    len -= bl;
+    for (idx = so; idx < so + (len / 32); idx++) {
+        mask[idx + 1] = 0xffffffff;
+    }
+    len -= (32 * idx);
+    if (len) {
+        mask[idx + 1] |= (0xffffffff >> (32 - len));
+    }
+}
+
+int
+maskchk (uint32_t *mask, size_t size, size_t offset, size_t len) {
+    size_t idx, so, sb, bl;
+
+    so = offset / 32;
+    sb = offset % 32;
+    bl = (len > 32 - sb) ? 32 - sb : len;
+    if (mask[offset / 32] & ((0xffffffff >> (32 - bl)) << sb) ^ ((0xffffffff >> (32 - bl)) << sb)) {
+        return 0;
+    }
+    len -= bl;
+    for (idx = so; idx < so + (len / 32); idx++) {
+        if (mask[idx + 1] ^ 0xffffffff) {
+            return 0;
+        }
+    }
+    len -= (32 * idx);
+    if (len) {
+        if (mask[idx + 1] & (0xffffffff >> (32 - len)) ^ (0xffffffff >> (32 - len))) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void
+maskclr (uint32_t *mask, size_t size) {
+    memset(mask, 0, sizeof(*mask) * size);
+}
+
+#define ISBIT(x) (x ? 1 : 0)
+void
+maskdbg (void *mask, size_t size) {
+    uint8_t *ptr;
+
+    for (ptr = (uint8_t *)mask; ptr < (uint8_t *)mask + size; ptr++) {
+        fprintf(stderr, "%d%d%d%d %d%d%d%d\n",
+            ISBIT(*ptr & 0x01), ISBIT(*ptr & 0x02), ISBIT(*ptr & 0x04), ISBIT(*ptr &0x08),
+            ISBIT(*ptr & 0x10), ISBIT(*ptr & 0x20), ISBIT(*ptr & 0x40), ISBIT(*ptr &0x80));
+    }
+}
 /*
 void
 bitmap_set_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {
@@ -128,9 +189,5 @@ bitmap_set_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {
 		len -= bit;
 		offset += bit;
 	}
-}
-
-int
-bitmap_check_bit (uint32_t *bitmap, size_t size, size_t offset, size_t len) {
 }
 */

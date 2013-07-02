@@ -2,7 +2,7 @@ PROGRAM = echo_server
 
 OBJECTS = microps.o tcp.o udp.o icmp.o ip.o arp.o ethernet.o util.o
 
-CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter
+CFLAGS  := $(CFLAGS) -g -W -Wall -Wno-unused-parameter 
 
 ifeq ($(shell uname),Linux)
 	OBJECTS := $(OBJECTS) pkt.o

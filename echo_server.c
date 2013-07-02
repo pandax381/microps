@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -34,7 +35,7 @@ main (int argc, char *argv[]) {
     if (soc == -1) {
         goto ERROR;
 	}
-    if (tcp_api_bind(soc, 7) == -1) {
+    if (tcp_api_bind(soc, hton16(7)) == -1) {
         goto ERROR;
     }
     tcp_api_listen(soc);
@@ -52,6 +53,23 @@ fprintf(stderr, "accept success, soc=%d, acc=%d\n", soc, acc);
 		tcp_api_send(acc, buf, len);
 	}
 	tcp_api_close(acc);
+/*
+    ip_addr_t peer_addr;
+    uint16_t peer_port;
+    ip_addr_pton("72.21.215.232", &peer_addr);
+    peer_port = hton16(80);
+    tcp_api_connect(soc, &peer_addr, peer_port);
+    strcpy(buf, "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: Close\r\n\r\n");
+    tcp_api_send(soc, (uint8_t *)buf, strlen(buf));
+    while (1) {
+        len = tcp_api_recv(soc, (uint8_t *)buf, sizeof(buf));
+        //fprintf(stderr, "len: %ld\n", len);
+        if (len <= 0) {
+            break;
+        }
+        //hexdump(stderr, buf, len);
+    }
+*/
 	tcp_api_close(soc);
 	microps_cleanup();
     return  0;

@@ -10,6 +10,8 @@
 #include "util.h"
 
 #define TCP_CB_TABLE_SIZE 128
+#define TCP_SOURCE_PORT_MIN 49152
+#define TCP_SOURCE_PORT_MAX 65535
 
 #define TCP_CB_STATE_CLOSED      0
 #define TCP_CB_STATE_LISTEN      1
@@ -29,6 +31,9 @@
 #define TCP_FLG_PSH 0x08
 #define TCP_FLG_ACK 0x10
 #define TCP_FLG_URG 0x20
+
+#define TCP_FLG_IS(x, y) ((x & 0x3f) == (y))
+#define TCP_FLG_ISSET(x, y) ((x & 0x3f) & (y))
 
 struct tcp_hdr {
     uint16_t src;
@@ -55,311 +60,58 @@ struct tcp_txq_head {
 };
 
 struct tcp_cb {
+    uint8_t used;
     uint8_t state;
     uint16_t port;
-    uint32_t seq;
-    uint32_t ack;
-    struct tcp_txq_head txq;
     struct {
         ip_addr_t addr;
         uint16_t port;
-        uint32_t seq;
-        uint32_t ack;
-        struct timeval timestamp;
     } peer;
-    uint8_t window[65536];
-    uint16_t len;
-    pthread_cond_t cond;
-    struct tcp_cb *backlog;
+    struct {
+        uint32_t nxt;
+        uint32_t una;
+        uint16_t up;
+        uint32_t wl1;
+        uint32_t wl2;
+        uint16_t wnd;
+    } snd;
+    uint32_t iss;
+    struct {
+        uint32_t nxt;
+        uint16_t up;
+        uint16_t wnd;
+    } rcv;
+    uint32_t irs;
+    struct tcp_txq_head txq;
+    uint8_t window[65535];
     struct tcp_cb *parent;
-    struct tcp_cb *next;
+    struct queue_head backlog;
+    pthread_cond_t cond;
 };
 
-static void
-tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst);
-static ssize_t
-tcp_output (struct tcp_cb *cb, uint8_t *buf, size_t len, uint8_t flg);
+#define TCP_CB_LISTENER_SIZE 128
 
 struct {
     pthread_t thread;
     struct {
         struct tcp_cb table[TCP_CB_TABLE_SIZE];
-        struct tcp_cb *head;
-        struct tcp_cb *pool;
         pthread_mutex_t mutex;
     } cb;
 } tcp;
 
-static void *
-tcp_timer_thread (void *arg) {
-    struct timeval timestamp;
-    struct tcp_cb *cb;
-    struct tcp_txq_entry *txq, *prev;
-    ip_addr_t peer;
-
-    while (1) {
-        gettimeofday(&timestamp, NULL);
-        pthread_mutex_lock(&tcp.cb.mutex);
-        for (cb = tcp.cb.head; cb; cb = cb->next) {
-            if (cb->peer.ack == cb->seq) {
-                continue;
-            }
-            prev = NULL;
-            for (txq = cb->txq.head; txq; txq = txq->next) {
-                if (txq->segment->seq > hton32(cb->peer.ack)) {
-                    if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
-                        peer = hton32(cb->peer.addr);
-                        ip_send(IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
-                        txq->timestamp = timestamp;
-                    }
-                } else {
-                    if (prev) {
-                        prev->next = txq->next;
-                        if (!prev->next) {
-                            cb->txq.tail = prev;
-                        }
-                    } else {
-                        cb->txq.head = cb->txq.tail = txq->next;
-                    }
-                }
-                prev = txq;
-            }
-        }
-        pthread_mutex_unlock(&tcp.cb.mutex);
-        usleep(100000);
-    }
-    return NULL;
-}
-
-int
-tcp_init (void) {
-    int index;
-
-    for (index = 0; index < TCP_CB_TABLE_SIZE - 1; index++) {
-        tcp.cb.table[index].next = tcp.cb.table + (index + 1);
-        pthread_cond_init(&tcp.cb.table[index].cond, NULL);
-    }
-    pthread_cond_init(&tcp.cb.table[index].cond, NULL);
-    pthread_mutex_init(&tcp.cb.mutex, NULL);
-    tcp.cb.pool = tcp.cb.table;
-    if (ip_add_protocol(IP_PROTOCOL_TCP, tcp_input) == -1) {
-        return -1;
-    }
-    if (pthread_create(&tcp.thread, NULL, tcp_timer_thread, NULL) == -1) {
-        return -1;
-    }
-    return 0;
-}
-
-
-
-static void
-tcp_statemachine (struct tcp_hdr *hdr, size_t len, struct tcp_cb *cb) {
-    size_t hlen;
-
-    if (hdr->flg & TCP_FLG_RST) {
-        return;
-    }
-    fprintf(stderr, "state: %u\n", cb->state);
-    switch (cb->state) {
-        case TCP_CB_STATE_CLOSED:
-            tcp_output(cb, NULL, 0, TCP_FLG_RST);
-            break;
-        case TCP_CB_STATE_LISTEN:
-            if ((hdr->flg & 0x3f) == TCP_FLG_SYN) {
-                cb->state = TCP_CB_STATE_SYN_RCVD;
-                cb->peer.seq = ntoh32(hdr->seq);
-                cb->peer.ack = 0;
-                cb->seq = 1024;
-                cb->ack = cb->peer.seq + 1;
-                tcp_output(cb, NULL, 0, TCP_FLG_SYN | TCP_FLG_ACK);
-                cb->seq++;
-            }
-            break;
-        case TCP_CB_STATE_SYN_SENT:
-            if ((hdr->flg & 0x3f) & TCP_FLG_SYN) {
-                if ((hdr->flg & 0x3f) & TCP_FLG_ACK) {
-                    if (ntoh32(hdr->ack) != cb->seq) {
-                        return;
-                    }
-                    cb->state = TCP_CB_STATE_ESTABLISHED;
-                    cb->peer.seq = ntoh32(hdr->seq);
-                    cb->peer.ack = ntoh32(hdr->ack);
-                    cb->ack = cb->peer.seq + 1;
-                    tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                    pthread_cond_signal(&cb->cond);
-                } else {
-                    cb->state = TCP_CB_STATE_SYN_RCVD;
-                    cb->peer.seq = ntoh32(hdr->seq);
-                    cb->peer.ack = 0;
-                    cb->seq = 1024;
-                    cb->ack = cb->peer.seq + 1;
-                    tcp_output(cb, NULL, 0, TCP_FLG_SYN | TCP_FLG_ACK);
-                    cb->seq++;
-                }
-            }
-            break;
-        case TCP_CB_STATE_SYN_RCVD:
-            if ((hdr->flg & 0x3f) == TCP_FLG_ACK) {
-                if (ntoh32(hdr->ack) != cb->seq) {
-                    return;
-                }
-                cb->state = TCP_CB_STATE_ESTABLISHED;
-                cb->peer.seq = ntoh32(hdr->seq);
-                cb->peer.ack = ntoh32(hdr->ack);
-                pthread_cond_signal(&cb->parent->cond);
-            } else if ((hdr->flg & 0x3f) == TCP_FLG_SYN && ntoh32(hdr->seq) == cb->peer.seq) {
-                cb->seq--;
-                tcp_output(cb, NULL, 0, TCP_FLG_SYN | TCP_FLG_ACK);
-                cb->seq++;
-            }
-            break;
-        case TCP_CB_STATE_ESTABLISHED:
-            if (ntoh32(hdr->ack) != cb->seq) {
-fprintf(stderr, ">>1\n");
-                return;
-            }
-            hlen = (hdr->off >> 4) << 2;
-            cb->peer.ack = ntoh32(hdr->ack);
-            if (len - hlen > 0) {
-fprintf(stderr, ">>2\n");
-                cb->peer.seq = ntoh32(hdr->seq);
-                cb->ack = cb->peer.seq + (len - hlen);
-                tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                memcpy(cb->window + cb->len, (uint8_t *)hdr + hlen, len - hlen);
-                cb->len += len - hlen;
-                pthread_cond_signal(&cb->cond);
-            }
-            if ((hdr->flg & 0x3f) & TCP_FLG_FIN) {
-                cb->state = TCP_CB_STATE_CLOSE_WAIT;
-                cb->peer.seq = ntoh32(hdr->seq);
-                cb->ack = cb->peer.seq + 1;
-                tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                cb->state = TCP_CB_STATE_LAST_ACK;
-                tcp_output(cb, NULL, 0, TCP_FLG_FIN | TCP_FLG_ACK);
-            }
-            break;
-        case TCP_CB_STATE_FIN_WAIT1:
-            if ((hdr->flg & 0x3f) & TCP_FLG_FIN) {
-                if ((hdr->flg & 0x3f) & TCP_FLG_ACK) {
-                    cb->state = TCP_CB_STATE_TIME_WAIT;
-                    cb->peer.seq = ntoh32(hdr->seq);
-                    cb->ack = cb->peer.seq + 1;
-                    tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                    pthread_cond_signal(&cb->cond);
-                } else {
-                    cb->state = TCP_CB_STATE_CLOSING;
-                    cb->peer.seq = ntoh32(hdr->seq);
-                    cb->ack = cb->peer.seq + 1;
-                    tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                }
-            } else if ((hdr->flg & 0x3f) & TCP_FLG_ACK) {
-                if (ntoh32(hdr->ack) != cb->seq) {
-                    return;
-                }
-                cb->state = TCP_CB_STATE_FIN_WAIT2;
-                cb->peer.seq = ntoh32(hdr->seq);
-            }
-            break;
-        case TCP_CB_STATE_FIN_WAIT2:
-            if ((hdr->flg & 0x3f) & TCP_FLG_FIN) {
-                if (ntoh32(hdr->ack) != cb->seq) {
-                    return;
-                }
-                cb->state = TCP_CB_STATE_TIME_WAIT;
-                cb->peer.seq = ntoh32(hdr->seq);
-                cb->ack = cb->peer.seq + 1;
-                tcp_output(cb, NULL, 0, TCP_FLG_ACK);
-                pthread_cond_signal(&cb->cond);
-            }
-            break;
-        case TCP_CB_STATE_CLOSING:
-            if ((hdr->flg & 0x3f) & TCP_FLG_ACK) {
-                if (ntoh32(hdr->ack) != cb->seq) {
-                    return;
-                }
-                cb->state = TCP_CB_STATE_TIME_WAIT;
-                cb->len = 0;
-                pthread_cond_signal(&cb->cond);
-            }
-            break;
-        case TCP_CB_STATE_TIME_WAIT:
-            // none
-            break;
-        case TCP_CB_STATE_CLOSE_WAIT:
-            // none
-            break;
-        case TCP_CB_STATE_LAST_ACK:
-            if ((hdr->flg & 0x3f) & TCP_FLG_ACK) {
-                if (ntoh32(hdr->ack) != cb->seq) {
-                    return;
-                }
-                cb->state = TCP_CB_STATE_CLOSED;
-                cb->len = 0;
-                pthread_cond_signal(&cb->cond);
-            }
-            break;
-    }
-}
-
-static void
-tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst) {
-    struct tcp_hdr *hdr;
-    uint32_t pseudo = 0;
-    struct tcp_cb *cb, *backlog;
-
-    if (len < sizeof(struct tcp_hdr)) {
-        return;
-    }
-    hdr = (struct tcp_hdr *)segment;
-    pseudo += *src >> 16;
-    pseudo += *src & 0xffff;
-    pseudo += *dst >> 16;
-    pseudo += *dst & 0xffff;
-    pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
-    pseudo += hton16(len);
-    if (cksum16((uint16_t *)hdr, len, pseudo) != 0) {
-        return;
-    }
-    pthread_mutex_lock(&tcp.cb.mutex);
-    for (cb = tcp.cb.head; cb; cb = cb->next) {
-        if (cb->port == ntoh16(hdr->dst)) {
-            if (cb->state == TCP_CB_STATE_LISTEN) {
-                for (backlog = cb->backlog; backlog; backlog = backlog->next) {
-                    if (backlog->peer.addr == ntoh32(*src) && backlog->peer.port == ntoh16(hdr->src)) {
-                        break;
-                    }
-                }
-                if (!backlog) {
-                    if ((hdr->flg & 0x3f) == TCP_FLG_SYN) {
-                        backlog = tcp.cb.pool;
-                    }
-                    if (!backlog) {
-                        pthread_mutex_unlock(&tcp.cb.mutex);
-                        return;
-                    }
-                    tcp.cb.pool = backlog->next;
-                    backlog->next = cb->backlog;
-                    cb->backlog = backlog;
-                    backlog->state = cb->state;
-                    backlog->port = cb->port;
-                    backlog->peer.addr = ntoh32(*src);
-                    backlog->peer.port = ntoh16(hdr->src);
-                    backlog->parent = cb;
-                }
-                cb = backlog;
-            }
-            if (cb->peer.addr == ntoh32(*src) && cb->peer.port == ntoh16(hdr->src)) {
-                tcp_statemachine(hdr, len, cb);
-                pthread_mutex_unlock(&tcp.cb.mutex);
-                return;
-            }
-        }
-    }
-    pthread_mutex_unlock(&tcp.cb.mutex);
-    fprintf(stderr, "%u -> %u\n", ntoh16(hdr->src), ntoh16(hdr->dst));
-    return;
-}
+#define TCP_CB_TABLE_FOREACH(x) \
+    for (x = tcp.cb.table; x != tcp.cb.table + TCP_CB_TABLE_SIZE; x++)
+#define TCP_CB_TABLE_OFFSET(x) \
+    (((caddr_t)x - (caddr_t)tcp.cb.table) / sizeof(*x))
+#define TCP_CB_STATE_RX_ISREADY(x) \
+    (x->state == TCP_CB_STATE_ESTABLISHED || \
+    x->state == TCP_CB_STATE_FIN_WAIT1 || \
+    x->state == TCP_CB_STATE_FIN_WAIT2)
+#define TCP_CB_STATE_TX_ISREADY(x) \
+    (x->state == TCP_CB_STATE_ESTABLISHED || \
+    x->state == TCP_CB_STATE_CLOSE_WAIT)
+#define TCP_SOCKET_ISINVALID(x) \
+    (x < 0 || x >= TCP_CB_TABLE_SIZE)
 
 static int
 tcp_txq_add (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
@@ -387,7 +139,7 @@ tcp_txq_add (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
 }
 
 static ssize_t
-tcp_output (struct tcp_cb *cb, uint8_t *buf, size_t len, uint8_t flg) {
+tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t *buf, size_t len) {
     uint8_t segment[1500];
     struct tcp_hdr *hdr;
     ip_addr_t self, peer;
@@ -395,18 +147,18 @@ tcp_output (struct tcp_cb *cb, uint8_t *buf, size_t len, uint8_t flg) {
 
     memset(&segment, 0, sizeof(segment));
     hdr = (struct tcp_hdr *)segment;
-    hdr->src = hton16(cb->port);
-    hdr->dst = hton16(cb->peer.port);
-    hdr->seq = hton32(cb->seq);
-    hdr->ack = (flg & TCP_FLG_ACK) ? hton32(cb->ack) : 0;
+    hdr->src = cb->port;
+    hdr->dst = cb->peer.port;
+    hdr->seq = hton32(seq);
+    hdr->ack = hton32(ack);
     hdr->off = (sizeof(struct tcp_hdr) >> 2) << 4;
     hdr->flg = flg;
-    hdr->win = hton16(65535);
+    hdr->win = hton16(cb->rcv.wnd);
     hdr->sum = 0;
     hdr->urg = 0;
     memcpy(hdr + 1, buf, len);
     ip_get_addr(&self);
-    peer = hton32(cb->peer.addr);
+    peer = cb->peer.addr;
     pseudo += (self >> 16) & 0xffff;
     pseudo += self & 0xffff;
     pseudo += (peer >> 16) & 0xffff;
@@ -414,9 +166,294 @@ tcp_output (struct tcp_cb *cb, uint8_t *buf, size_t len, uint8_t flg) {
     pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
     pseudo += hton16(sizeof(struct tcp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct tcp_hdr) + len, pseudo);
-    ip_send(IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
+    ip_output(IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
     tcp_txq_add(cb, hdr, sizeof(struct tcp_hdr) + len);
     return len;
+}
+
+static void *
+tcp_timer_thread (void *arg) {
+    struct timeval timestamp;
+    struct tcp_cb *cb;
+    struct tcp_txq_entry *txq, *prev;
+    ip_addr_t peer;
+
+    while (1) {
+        gettimeofday(&timestamp, NULL);
+        pthread_mutex_lock(&tcp.cb.mutex);
+        TCP_CB_TABLE_FOREACH (cb) {
+            if (cb->snd.una == cb->snd.nxt) {
+                continue;
+            }
+            prev = NULL;
+            for (txq = cb->txq.head; txq; txq = txq->next) {
+                if (txq->segment->seq >= hton32(cb->snd.una)) {
+                    if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
+                        peer = cb->peer.addr;
+                        ip_output(IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
+                        txq->timestamp = timestamp;
+                    }
+                } else {
+                    if (prev) {
+                        prev->next = txq->next;
+                        if (!prev->next) {
+                            cb->txq.tail = prev;
+                        }
+                    } else {
+                        cb->txq.head = cb->txq.tail = txq->next;
+                    }
+                }
+                prev = txq;
+            }
+        }
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        usleep(100000);
+    }
+    return NULL;
+}
+
+static void
+tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
+    uint32_t seq, ack;
+    size_t hlen, plen;
+
+    hlen = ((hdr->off >> 4) << 2);
+    plen = len - hlen;
+    switch (cb->state) {
+        case TCP_CB_STATE_CLOSED:
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
+                return;
+            }
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+                seq = ntoh32(hdr->ack);
+                ack = 0;
+            } else {
+                seq = 0;
+                ack = ntoh32(hdr->seq);
+                if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_SYN)) {
+                    ack++;
+                }
+                if (plen) {
+                    ack += plen;
+                }
+                if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_FIN)) {
+                    ack++;
+                }
+            }
+            tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+            return;
+        case TCP_CB_STATE_LISTEN:
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
+                return;
+            }
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+                seq = ntoh32(hdr->ack);
+                ack = 0;
+                tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+                return;
+            }
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_SYN)) {
+                cb->rcv.nxt = ntoh32(hdr->seq) + 1;
+                cb->irs = ntoh32(hdr->seq);
+                cb->iss = (uint32_t)random();
+                seq = cb->iss;
+                ack = cb->rcv.nxt;
+                tcp_output(cb, seq, ack, TCP_FLG_SYN | TCP_FLG_ACK, NULL, 0);
+                cb->snd.nxt = cb->iss + 1;
+                cb->snd.una = cb->iss;
+                cb->state = TCP_CB_STATE_SYN_RCVD;
+            }
+            return;
+        case TCP_CB_STATE_SYN_SENT:
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+                if (ntoh32(hdr->ack) <= cb->iss || ntoh32(hdr->ack) > cb->snd.nxt) {
+                    if (!TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
+                        seq = ntoh32(hdr->ack);
+                        ack = 0;
+                        tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+                    }
+                    return;
+                }
+            }
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
+                if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+                    // TCB close
+                }
+                return;
+            }
+            if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_SYN)) {
+                cb->rcv.nxt = ntoh32(hdr->seq) + 1;
+                cb->irs = ntoh32(hdr->seq);
+                if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+                    cb->snd.una = ntoh32(hdr->ack);
+                    // delete TX queue
+                    if (cb->snd.una > cb->iss) {
+                        cb->state = TCP_CB_STATE_ESTABLISHED;
+                        seq = cb->snd.nxt;
+                        ack = cb->rcv.nxt;
+                        tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+                        pthread_cond_signal(&cb->cond);
+                    }
+                    return;
+                }
+                seq = cb->iss;
+                ack = cb->rcv.nxt;
+                tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+            }
+            return;
+        default:
+            break;
+    }
+    if (ntoh32(hdr->seq) != cb->rcv.nxt) {
+        fprintf(stderr, "err 1, hdr->seq: %u, cb->rcv.nxt: %u\n", ntoh32(hdr->seq), cb->rcv.nxt);
+        // error
+        return;
+    }
+    if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST | TCP_FLG_SYN)) {
+        fprintf(stderr, "err 2\n");
+        // error
+        return;
+    }
+    if (!TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
+        fprintf(stderr, "err 3\n");
+        // error
+        return;
+    }
+    switch (cb->state) {
+        case TCP_CB_STATE_SYN_RCVD:
+            if (cb->snd.una <= ntoh32(hdr->ack) && ntoh32(hdr->ack) <= cb->snd.nxt) {
+                cb->state = TCP_CB_STATE_ESTABLISHED;
+                queue_push(&cb->parent->backlog, cb, sizeof(*cb));
+                pthread_cond_signal(&cb->parent->cond);
+                break;
+            }
+            break;
+        case TCP_CB_STATE_ESTABLISHED:
+        case TCP_CB_STATE_FIN_WAIT1:
+        case TCP_CB_STATE_FIN_WAIT2:
+        case TCP_CB_STATE_CLOSE_WAIT:
+        case TCP_CB_STATE_CLOSING:
+            if (cb->snd.una < ntoh32(hdr->ack) && ntoh32(hdr->ack) <= cb->snd.nxt) {
+                cb->snd.una = ntoh32(hdr->ack);
+            } else if (ntoh32(hdr->ack) > cb->snd.nxt) {
+                tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
+                return;
+            }
+            // send window update
+            if (cb->state == TCP_CB_STATE_FIN_WAIT1) {
+                if (ntoh32(hdr->ack) == cb->snd.nxt) {
+                    cb->state = TCP_CB_STATE_FIN_WAIT2;
+                }
+            } else if (cb->state == TCP_CB_STATE_CLOSING) {
+                if (ntoh32(hdr->ack) == cb->snd.nxt) {
+                    cb->state = TCP_CB_STATE_TIME_WAIT;
+                    pthread_cond_signal(&cb->cond);
+                }
+                return;
+            }
+            break;
+        case TCP_CB_STATE_LAST_ACK:
+            cb->state = TCP_CB_STATE_CLOSED;
+            pthread_cond_signal(&cb->cond);
+            return;
+    }
+    if (plen) {
+        switch (cb->state) {
+            case TCP_CB_STATE_ESTABLISHED:
+            case TCP_CB_STATE_FIN_WAIT1:
+            case TCP_CB_STATE_FIN_WAIT2:
+                memcpy(cb->window + (sizeof(cb->window) - cb->rcv.wnd), (uint8_t *)hdr + hlen, plen);
+                cb->rcv.nxt = ntoh32(hdr->seq) + plen;
+                cb->rcv.wnd -= plen;
+                seq = cb->snd.nxt;
+                ack = cb->rcv.nxt;
+                tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+                pthread_cond_signal(&cb->cond);
+                break;
+            default:
+                break;
+        }
+    }
+    if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_FIN)) {
+        cb->rcv.nxt++;
+        tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
+        switch (cb->state) {
+            case TCP_CB_STATE_SYN_RCVD:
+            case TCP_CB_STATE_ESTABLISHED:
+                cb->state = TCP_CB_STATE_CLOSE_WAIT;
+                pthread_cond_signal(&cb->cond);
+                break;
+            case TCP_CB_STATE_FIN_WAIT1:
+                cb->state = TCP_CB_STATE_FIN_WAIT2;
+                break;
+            case TCP_CB_STATE_FIN_WAIT2:
+                cb->state = TCP_CB_STATE_TIME_WAIT;
+                pthread_cond_signal(&cb->cond);
+                break;
+            default:
+                break;
+        }
+        return;
+    }
+    return;
+}
+
+static void
+tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst) {
+    struct tcp_hdr *hdr;
+    uint32_t pseudo = 0;
+    struct tcp_cb *cb, *fcb = NULL, *lcb = NULL;
+
+    if (*dst != ip_get_addr(NULL)) {
+        return;
+    }
+    if (len < sizeof(struct tcp_hdr)) {
+        return;
+    }
+    hdr = (struct tcp_hdr *)segment;
+    pseudo += *src >> 16;
+    pseudo += *src & 0xffff;
+    pseudo += *dst >> 16;
+    pseudo += *dst & 0xffff;
+    pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
+    pseudo += hton16(len);
+    if (cksum16((uint16_t *)hdr, len, pseudo) != 0) {
+        return;
+    }
+    pthread_mutex_lock(&tcp.cb.mutex);
+    TCP_CB_TABLE_FOREACH (cb) {
+        if (!cb->used) {
+            if (!fcb) {
+                fcb = cb;
+            }
+        }
+        else if (cb->port == hdr->dst) {
+            if (cb->peer.addr == *src && cb->peer.port == hdr->src) {
+                break;
+            }
+            if (cb->state == TCP_CB_STATE_LISTEN && !lcb) {
+                lcb = cb;
+            }
+        }
+    }
+    if (TCP_CB_TABLE_OFFSET(cb) == TCP_CB_TABLE_SIZE) {
+        if (!lcb || !fcb || !TCP_FLG_IS(hdr->flg, TCP_FLG_SYN)) {
+            // send RST
+            pthread_mutex_unlock(&tcp.cb.mutex);
+            return;
+        }
+        cb = fcb;
+        cb->used = 1;
+        cb->state = lcb->state;
+        cb->port = lcb->port;
+        cb->peer.addr = *src;
+        cb->peer.port = hdr->src;
+        cb->rcv.wnd = sizeof(cb->window);
+        cb->parent = lcb;
+    }
+    tcp_incoming_event(cb, hdr, len);
+    pthread_mutex_unlock(&tcp.cb.mutex);
+    return;
 }
 
 int
@@ -424,64 +461,93 @@ tcp_api_open (void) {
     struct tcp_cb *cb;
 
     pthread_mutex_lock(&tcp.cb.mutex);
-    cb = tcp.cb.pool;
-    if (!cb) {
-        return -1;
-    }
-    tcp.cb.pool = cb->next;
-    cb->next = tcp.cb.head;
-    tcp.cb.head = cb;
-    pthread_mutex_unlock(&tcp.cb.mutex);
-    return ((caddr_t)cb - (caddr_t)tcp.cb.table) / sizeof(struct tcp_cb);
-}
-
-int
-tcp_api_close (int soc) {
-    struct tcp_cb *cb, *prev = NULL;
-
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
-        return -1;
-    }
-    pthread_mutex_lock(&tcp.cb.mutex);
-    for (cb = tcp.cb.head; cb; cb = cb->next) {
-        if (cb == tcp.cb.table + soc) {
-            cb->port = 0;
-            cb->state = TCP_CB_STATE_CLOSED;
-            if (prev) {
-                prev->next = cb->next;
-            } else {
-                tcp.cb.head = cb->next;
-            }
-            cb->next = tcp.cb.pool;
-            tcp.cb.pool = cb;
+    TCP_CB_TABLE_FOREACH (cb) {
+        if (!cb->used) {
+            cb->used = 1;
             pthread_mutex_unlock(&tcp.cb.mutex);
-            return 0;
+            return TCP_CB_TABLE_OFFSET(cb);
         }
-        prev = cb;
     }
     pthread_mutex_unlock(&tcp.cb.mutex);
     return -1;
 }
 
 int
-tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
+tcp_api_close (int soc) {
     struct tcp_cb *cb;
 
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
     cb = &tcp.cb.table[soc];
-    cb->port = 40381;
-    cb->state = TCP_CB_STATE_SYN_SENT;
-    cb->peer.addr = ntoh32(*addr);
+    if (!cb->used) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    switch (cb->state) {
+        case TCP_CB_STATE_SYN_RCVD:
+        case TCP_CB_STATE_ESTABLISHED:
+            tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
+            cb->state = TCP_CB_STATE_FIN_WAIT1;
+            cb->snd.nxt++;
+            pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
+            break;
+        case TCP_CB_STATE_CLOSE_WAIT:
+            tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
+            cb->state = TCP_CB_STATE_LAST_ACK;
+            cb->snd.nxt++;
+            pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
+            break;
+        default:
+            break;
+    }
+    cb->used = 0;
+    cb->state = TCP_CB_STATE_CLOSED;
+    cb->port = 0;
+    pthread_mutex_unlock(&tcp.cb.mutex);
+    return 0;
+}
+
+int
+tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
+    struct tcp_cb *cb, *tmp;
+    uint16_t p;
+
+    if (TCP_SOCKET_ISINVALID(soc)) {
+        return -1;
+    }
+    pthread_mutex_lock(&tcp.cb.mutex);
+    cb = &tcp.cb.table[soc];
+    if (!cb->used || cb->state != TCP_CB_STATE_CLOSED) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    if (!cb->port) {
+        int offset = time(NULL) % 1024;
+        for (p = TCP_SOURCE_PORT_MIN + offset; p <= TCP_SOURCE_PORT_MAX; p++) {
+            TCP_CB_TABLE_FOREACH (tmp) {
+                if (tmp->used && tmp->port == hton16(p)) {
+                    break;
+                }
+            }
+            if (TCP_CB_TABLE_OFFSET(tmp) == TCP_CB_TABLE_SIZE) {
+                cb->port = hton16(p);
+                break;
+            }
+        }
+        if (!cb->port) {
+            pthread_mutex_unlock(&tcp.cb.mutex);
+            return -1;
+        }
+    }
+    cb->peer.addr = *addr;
     cb->peer.port = port;
-    cb->peer.seq = 0;
-    cb->peer.ack = 0;
-    cb->seq = 10000;
-    cb->ack = 0;
-    tcp_output(cb, NULL, 0, TCP_FLG_SYN);
-    cb->seq++;
+    cb->rcv.wnd = sizeof(cb->window);
+    cb->iss = (uint32_t)random();
+    tcp_output(cb, cb->iss, 0, TCP_FLG_SYN, NULL, 0);
+    cb->snd.nxt = cb->iss + 1;
+    cb->state = TCP_CB_STATE_SYN_SENT;
     while (cb->state == TCP_CB_STATE_SYN_SENT) {
         pthread_cond_wait(&tcp.cb.table[soc].cond, &tcp.cb.mutex);
     }
@@ -493,73 +559,96 @@ int
 tcp_api_bind (int soc, uint16_t port) {
     struct tcp_cb *cb;
 
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
-    for (cb = tcp.cb.head; cb; cb = cb->next) {
+    TCP_CB_TABLE_FOREACH (cb) {
         if (cb->port == port) {
             pthread_mutex_unlock(&tcp.cb.mutex);
             return -1;
         }
     }
-    tcp.cb.table[soc].port = port;
+    cb = &tcp.cb.table[soc];
+    if (!cb->used || cb->state != TCP_CB_STATE_CLOSED) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    cb->port = port;
     pthread_mutex_unlock(&tcp.cb.mutex);
     return 0;
 }
 
 int
 tcp_api_listen (int soc) {
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
+    struct tcp_cb *cb;
+
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
-    tcp.cb.table[soc].state = TCP_CB_STATE_LISTEN;
+    cb = &tcp.cb.table[soc];
+    if (!cb->used || cb->state != TCP_CB_STATE_CLOSED || !cb->port) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    cb->state = TCP_CB_STATE_LISTEN;
     pthread_mutex_unlock(&tcp.cb.mutex);
     return 0;
 }
 
 int
 tcp_api_accept (int soc) {
-    struct tcp_cb *backlog;
+    struct tcp_cb *cb, *backlog;
+    struct queue_entry *entry;
 
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
-        return -1;
-    }
-    if (tcp.cb.table[soc].state != TCP_CB_STATE_LISTEN) {
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
-    while (!(backlog = tcp.cb.table[soc].backlog)) {
-        pthread_cond_wait(&tcp.cb.table[soc].cond, &tcp.cb.mutex);
+    cb = &tcp.cb.table[soc];
+    if (!cb->used) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
     }
-    tcp.cb.table[soc].backlog = backlog->next;
-    backlog->next = tcp.cb.head;
-    tcp.cb.head = backlog;
+    if (cb->state != TCP_CB_STATE_LISTEN) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    while ((entry = queue_pop(&cb->backlog)) == NULL) {
+        pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
+    }
+    backlog = entry->data;
+    free(entry);
     pthread_mutex_unlock(&tcp.cb.mutex);
-    return ((caddr_t)backlog - (caddr_t)tcp.cb.table) / sizeof(struct tcp_cb);
+    return TCP_CB_TABLE_OFFSET(backlog);
 }
 
 ssize_t
 tcp_api_recv (int soc, uint8_t *buf, size_t size) {
     struct tcp_cb *cb;
-    ssize_t len;
+    size_t total, len;
 
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
     cb = &tcp.cb.table[soc];
-    if (cb->len == 0) {
-        if (cb->state != TCP_CB_STATE_ESTABLISHED && cb->state != TCP_CB_STATE_FIN_WAIT1) {
+    if (!cb->used) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    while (!(total = sizeof(cb->window) - cb->rcv.wnd)) {
+        if (!TCP_CB_STATE_RX_ISREADY(cb)) {
+            pthread_mutex_unlock(&tcp.cb.mutex);
             return 0;
         }
         pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
     }
-    len = (size > cb->len) ? cb->len : size;
+    len = size < total ? size : total;
     memcpy(buf, cb->window, len);
-    memmove(cb->window, cb->window + len, cb->len - len);
-    cb->len -= len;
+    memmove(cb->window, cb->window + len, total - len);
+    cb->rcv.wnd += len;
     pthread_mutex_unlock(&tcp.cb.mutex);
     return len;
 }
@@ -568,17 +657,38 @@ ssize_t
 tcp_api_send (int soc, uint8_t *buf, size_t len) {
     struct tcp_cb *cb;
 
-    if (soc < 0 || soc >= TCP_CB_TABLE_SIZE) {
+    if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
     cb = &tcp.cb.table[soc];
-    if (cb->state != TCP_CB_STATE_ESTABLISHED && cb->state != TCP_CB_STATE_CLOSE_WAIT) {
+    if (!cb->used) {
         pthread_mutex_unlock(&tcp.cb.mutex);
         return -1;
     }
-    tcp_output(cb, buf, len, TCP_FLG_ACK | TCP_FLG_PSH);
-    cb->seq += len;
+    if (!TCP_CB_STATE_TX_ISREADY(cb)) {
+        pthread_mutex_unlock(&tcp.cb.mutex);
+        return -1;
+    }
+    tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK | TCP_FLG_PSH, buf, len);
+    cb->snd.nxt += len;
     pthread_mutex_unlock(&tcp.cb.mutex);
+    return 0;
+}
+
+int
+tcp_init (void) {
+    struct tcp_cb *cb;
+
+    TCP_CB_TABLE_FOREACH (cb) {
+        pthread_cond_init(&cb->cond, NULL);
+    }
+    pthread_mutex_init(&tcp.cb.mutex, NULL);
+    if (ip_add_protocol(IP_PROTOCOL_TCP, tcp_input) == -1) {
+        return -1;
+    }
+    if (pthread_create(&tcp.thread, NULL, tcp_timer_thread, NULL) == -1) {
+        return -1;
+    }
     return 0;
 }

@@ -6,6 +6,12 @@
 #include <unistd.h>
 #include <sys/types.h>
 
+#ifndef MAX
+#define MAX(x, y) ((x) > (y) ? (x) : (y))
+#endif
+#ifndef MIN
+#define MIN(x, y) ((x) < (y) ? (x) : (y))
+#endif
 #define sizeof_member(s, m) sizeof(((s *)NULL)->m)
 
 struct queue_entry {
@@ -36,5 +42,13 @@ extern uint32_t
 hton32 (uint32_t h);
 extern uint32_t
 ntoh32 (uint32_t n);
+extern void
+maskset (uint32_t *mask, size_t size, size_t offset, size_t len);
+extern int
+maskchk (uint32_t *mask, size_t size, size_t offset, size_t len);
+extern void
+maskclr (uint32_t *mask, size_t size);
+extern void
+maskdbg (void *mask, size_t size);
 
 #endif

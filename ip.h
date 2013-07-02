@@ -26,10 +26,8 @@ extern ip_addr_t
 ip_get_addr (ip_addr_t *dst);
 extern int
 ip_add_protocol (uint8_t protocol, __ip_protocol_handler_t handler);
-extern void
-ip_recv (uint8_t *dgram, size_t dlen, ethernet_addr_t *src, ethernet_addr_t *dst);
 extern ssize_t
-ip_send (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
+ip_output (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
 extern int
 ip_addr_pton (const char *p, ip_addr_t *n);
 extern char *

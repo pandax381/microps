@@ -39,7 +39,7 @@ ethernet_add_protocol (uint16_t type, void (*callback)(uint8_t *, size_t, ethern
 extern void
 ethernet_input (uint8_t *frame, size_t flen);
 extern ssize_t
-ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const ethernet_addr_t *dst);
+ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const void *paddr, const ethernet_addr_t *dst);
 extern int
 ethernet_device_open (const char *name, const char *addr);
 extern void

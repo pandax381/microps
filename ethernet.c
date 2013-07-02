@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include "ethernet.h"
 #include "device.h"
+#include "arp.h"
 #include "util.h"
 
 #define ETHERNET_PROTOCOL_TABLE_SIZE 8
@@ -136,14 +137,23 @@ ethernet_input (uint8_t *frame, size_t flen) {
 }
 
 ssize_t
-ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const ethernet_addr_t *dst) {
+ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const void *paddr, const ethernet_addr_t *dst) {
+    ethernet_addr_t hwaddr;
+    int ret;
 	uint8_t frame[ETHERNET_FRAME_SIZE_MAX];
 	struct ethernet_hdr *hdr;
 	size_t flen;
 
-	if (!payload || plen > ETHERNET_PAYLOAD_SIZE_MAX || !dst) {
+	if (!payload || plen > ETHERNET_PAYLOAD_SIZE_MAX || (!paddr && !dst)) {
 		return -1;
 	}
+    if (paddr) {
+        ret = arp_resolve(paddr, &hwaddr, payload, plen);
+        if (ret != 1) {
+            return ret;
+        }
+        dst = &hwaddr;
+    }
 	memset(frame, 0, sizeof(frame));
 	hdr = (struct ethernet_hdr *)frame;
 	memcpy(hdr->dst.addr, dst->addr, ETHERNET_ADDR_LEN);
