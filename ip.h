@@ -20,6 +20,8 @@ typedef uint32_t ip_addr_t;
 
 typedef void (*__ip_protocol_handler_t)(uint8_t *, size_t, ip_addr_t *, ip_addr_t *);
 
+extern const ip_addr_t IP_ADDR_BCAST;
+
 extern int
 ip_addr_pton (const char *p, ip_addr_t *n);
 extern char *
