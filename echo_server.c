@@ -34,7 +34,7 @@ main (int argc, char *argv[]) {
     soc = tcp_api_open();
     if (soc == -1) {
         goto ERROR;
-	}
+    }
     if (tcp_api_bind(soc, hton16(7)) == -1) {
         goto ERROR;
     }
@@ -44,15 +44,15 @@ main (int argc, char *argv[]) {
         goto ERROR;
     }
 fprintf(stderr, "accept success, soc=%d, acc=%d\n", soc, acc);
-	while (1) {
-		len = tcp_api_recv(acc, buf, sizeof(buf));
-		if (len <= 0) {
-			break;
-		}
-		hexdump(stderr, buf, len);
-		tcp_api_send(acc, buf, len);
-	}
-	tcp_api_close(acc);
+    while (1) {
+        len = tcp_api_recv(acc, buf, sizeof(buf));
+        if (len <= 0) {
+            break;
+        }
+        hexdump(stderr, buf, len);
+        tcp_api_send(acc, buf, len);
+    }
+    tcp_api_close(acc);
 /*
     ip_addr_t peer_addr;
     uint16_t peer_port;
@@ -70,8 +70,8 @@ fprintf(stderr, "accept success, soc=%d, acc=%d\n", soc, acc);
         //hexdump(stderr, buf, len);
     }
 */
-	tcp_api_close(soc);
-	microps_cleanup();
+    tcp_api_close(soc);
+    microps_cleanup();
     return  0;
 ERROR:
     if (soc != -1) {

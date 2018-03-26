@@ -17,19 +17,19 @@
 #define ARP_LOOKUP_TIMEOUT_SEC 1
 
 struct arp_hdr {
-	uint16_t hrd;
-	uint16_t pro;
-	uint8_t hln;
-	uint8_t pln;
-	uint16_t op;
+    uint16_t hrd;
+    uint16_t pro;
+    uint8_t hln;
+    uint8_t pln;
+    uint16_t op;
 } __attribute__ ((packed));
 
 struct arp_ethernet {
     struct arp_hdr hdr;
-	ethernet_addr_t sha;
-	ip_addr_t spa;
-	ethernet_addr_t tha;
-	ip_addr_t tpa;
+    ethernet_addr_t sha;
+    ip_addr_t spa;
+    ethernet_addr_t tha;
+    ip_addr_t tpa;
 } __attribute__ ((packed));
 
 struct arp_entry {
@@ -73,7 +73,7 @@ arp_init (void) {
     }
     arp.table.head = NULL;
     arp.table.pool = arp.table.table;
-	pthread_mutex_init(&arp.mutex, NULL);
+    pthread_mutex_init(&arp.mutex, NULL);
     ethernet_add_protocol(ETHERNET_TYPE_ARP, arp_input);
     return 0;
 }
@@ -157,62 +157,62 @@ arp_table_check_timeout (void) {
 
 static int
 arp_send_request (const ip_addr_t *tpa) {
-	struct arp_ethernet request;
+    struct arp_ethernet request;
 
-	if (!tpa) {
+    if (!tpa) {
         return -1;
-	}
-	request.hdr.hrd = hton16(ARP_HRD_ETHERNET);
-	request.hdr.pro = hton16(ETHERNET_TYPE_IP);
-	request.hdr.hln = 6;
-	request.hdr.pln = 4;
-	request.hdr.op = hton16(ARP_OP_REQUEST);
+    }
+    request.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+    request.hdr.pro = hton16(ETHERNET_TYPE_IP);
+    request.hdr.hln = 6;
+    request.hdr.pln = 4;
+    request.hdr.op = hton16(ARP_OP_REQUEST);
     ethernet_get_addr(&request.sha);
     ip_get_addr(&request.spa);
-	memset(&request.tha, 0, ETHERNET_ADDR_LEN);
+    memset(&request.tha, 0, ETHERNET_ADDR_LEN);
     request.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), NULL, &ETHERNET_ADDR_BCAST) < 0) {
+    if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), NULL, &ETHERNET_ADDR_BCAST) < 0) {
         return -1;
-	}
-	return  0;
+    }
+    return  0;
 }
 
 static int
 arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
-	struct arp_ethernet reply;
+    struct arp_ethernet reply;
 
-	if (!tha || !tpa) {
+    if (!tha || !tpa) {
         return -1;
-	}
-	reply.hdr.hrd = hton16(ARP_HRD_ETHERNET);
-	reply.hdr.pro = hton16(ETHERNET_TYPE_IP);
-	reply.hdr.hln = 6;
-	reply.hdr.pln = 4;
-	reply.hdr.op = hton16(ARP_OP_REPLY);
+    }
+    reply.hdr.hrd = hton16(ARP_HRD_ETHERNET);
+    reply.hdr.pro = hton16(ETHERNET_TYPE_IP);
+    reply.hdr.hln = 6;
+    reply.hdr.pln = 4;
+    reply.hdr.op = hton16(ARP_OP_REPLY);
     ethernet_get_addr(&reply.sha);
     ip_get_addr(&reply.spa);
     reply.tha = *tha;
     reply.tpa = *tpa;
-	if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), NULL, dst) < 0) {
+    if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), NULL, dst) < 0) {
         return -1;
-	}
-	return 0;
+    }
+    return 0;
 }
 
 static void
 arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
-	struct arp_ethernet *message;
+    struct arp_ethernet *message;
     time_t timestamp;
     int marge = 0;
 
-	(void)dst;
-	if (plen < sizeof(struct arp_ethernet)) {
-		return;
-	}
-	message = (struct arp_ethernet *)packet;
-	if (ntoh16(message->hdr.hrd) != ARP_HRD_ETHERNET) {
-		return;
-	}
+    (void)dst;
+    if (plen < sizeof(struct arp_ethernet)) {
+        return;
+    }
+    message = (struct arp_ethernet *)packet;
+    if (ntoh16(message->hdr.hrd) != ARP_HRD_ETHERNET) {
+        return;
+    }
     if (ntoh16(message->hdr.pro) != ETHERNET_TYPE_IP) {
         return;
     }
@@ -246,7 +246,7 @@ int
 arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t len) {
     struct arp_entry *entry;
 
-	pthread_mutex_lock(&arp.mutex);
+    pthread_mutex_lock(&arp.mutex);
     if (arp_table_select(pa, ha) == 0) {
         pthread_mutex_unlock(&arp.mutex);
         return 1;

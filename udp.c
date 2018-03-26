@@ -293,7 +293,7 @@ init (void) {
         goto ERROR;
     }
     if (ethernet_device_run() == -1) {
-        goto ERROR;        
+        goto ERROR;
     }
     return 0;
 ERROR:

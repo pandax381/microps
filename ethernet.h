@@ -21,7 +21,7 @@
 #define ETHERNET_TYPE_LOOPBACK 0x9000
 
 typedef struct {
-	uint8_t addr[ETHERNET_ADDR_LEN];
+    uint8_t addr[ETHERNET_ADDR_LEN];
 } __attribute__ ((packed)) ethernet_addr_t;
 
 extern const ethernet_addr_t ETHERNET_ADDR_BCAST;

@@ -25,9 +25,9 @@ struct device {
 device_t *
 device_open (const char *name) {
     device_t *device;
-	int index, enable = 1;
-	char dev[16];
-	struct ifreq ifr;
+    int index, enable = 1;
+    char dev[16];
+    struct ifreq ifr;
 
     if ((device = malloc(sizeof(device_t))) == NULL) {
         perror("malloc");
@@ -36,21 +36,21 @@ device_open (const char *name) {
     device->fd = -1;
     device->buffer_size = 0;
     device->buffer = NULL;
-	for (index = 0; index < BPF_DEVICE_NUM; index++) {
-		snprintf(dev, sizeof(dev), "/dev/bpf%d", index);
-		if ((device->fd = open(dev, O_RDWR, 0)) != -1) {
-			break;
-		}
-	}
-	if (device->fd == -1) {
-		perror("open");
-		goto ERROR;
-	}
-	strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
-	if (ioctl(device->fd, BIOCSETIF, &ifr) == -1) {
-		perror("ioctl [BIOCSETIF]");
-		goto ERROR;
-	}
+    for (index = 0; index < BPF_DEVICE_NUM; index++) {
+        snprintf(dev, sizeof(dev), "/dev/bpf%d", index);
+        if ((device->fd = open(dev, O_RDWR, 0)) != -1) {
+            break;
+        }
+    }
+    if (device->fd == -1) {
+        perror("open");
+        goto ERROR;
+    }
+    strncpy(ifr.ifr_name, name, IFNAMSIZ - 1);
+    if (ioctl(device->fd, BIOCSETIF, &ifr) == -1) {
+        perror("ioctl [BIOCSETIF]");
+        goto ERROR;
+    }
     if (ioctl(device->fd, BIOCGBLEN, &device->buffer_size) == -1) {
         perror("ioctl [BIOCGBLEN]");
         goto ERROR;
@@ -59,28 +59,28 @@ device_open (const char *name) {
         perror("malloc");
         goto ERROR;
     }
-	if (ioctl(device->fd, BIOCPROMISC, NULL) == -1) {
-		perror("ioctl [BIOCPROMISC]");
-		goto ERROR;
-	}
-	if (ioctl(device->fd, BIOCSSEESENT, &enable) == -1) {
-		perror("ioctl [BIOCSSEESENT]");
-		goto ERROR;
-	}
-	if (ioctl(device->fd, BIOCIMMEDIATE, &enable) == -1) {
-		perror("ioctl [BIOCIMMEDIATE]");
-		goto ERROR;
-	}
-	if (ioctl(device->fd, BIOCSHDRCMPLT, &enable) == -1) {
-		perror("ioctl [BIOCSHDRCMPLT]");
-		goto ERROR;
-	}
-	return device;
+    if (ioctl(device->fd, BIOCPROMISC, NULL) == -1) {
+        perror("ioctl [BIOCPROMISC]");
+        goto ERROR;
+    }
+    if (ioctl(device->fd, BIOCSSEESENT, &enable) == -1) {
+        perror("ioctl [BIOCSSEESENT]");
+        goto ERROR;
+    }
+    if (ioctl(device->fd, BIOCIMMEDIATE, &enable) == -1) {
+        perror("ioctl [BIOCIMMEDIATE]");
+        goto ERROR;
+    }
+    if (ioctl(device->fd, BIOCSHDRCMPLT, &enable) == -1) {
+        perror("ioctl [BIOCSHDRCMPLT]");
+        goto ERROR;
+    }
+    return device;
 ERROR:
     if (device) {
         device_close(device);
     }
-	return NULL;
+    return NULL;
 }
 
 void
@@ -117,5 +117,5 @@ device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout
 
 ssize_t
 device_output (device_t *device, const uint8_t *buffer, size_t length) {
-	return write(device->fd, buffer, length);
+    return write(device->fd, buffer, length);
 }

@@ -15,15 +15,15 @@
 #define sizeof_member(s, m) sizeof(((s *)NULL)->m)
 
 struct queue_entry {
-	void *data;
-	size_t size;
-	struct queue_entry *next;
+    void *data;
+    size_t size;
+    struct queue_entry *next;
 };
 
 struct queue_head {
-	struct queue_entry *next;
-	struct queue_entry *tail;
-	unsigned int num;
+    struct queue_entry *next;
+    struct queue_entry *tail;
+    unsigned int num;
 };
 
 extern void
