@@ -65,7 +65,6 @@ device_close (device_t *device) {
     if (device->fd != -1) {
         close(device->fd);
     }
-    free(device->buffer);
     free(device);
 }
 
