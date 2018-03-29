@@ -8,6 +8,7 @@
 #include "icmp.h"
 #include "udp.h"
 #include "tcp.h"
+#include "dhcp.h"
 
 struct microps_param {
     char *ethernet_device;
@@ -15,6 +16,7 @@ struct microps_param {
     char *ip_addr;
     char *ip_netmask;
     char *ip_gateway;
+    uint8_t use_dhcp;
 };
 
 extern int
