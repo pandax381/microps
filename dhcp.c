@@ -297,35 +297,6 @@ dhcp_init(char *ethernet_addr) {
    
     udp_api_close(sock);
 
-
-    //get default-gateway and subnet-mask
-    uint8_t *options = ack->options;
-    //drop MAGIC
-    options += 4;    
-
-    size_t len;
-    uint8_t opt_type;
-    uint32_t *sbaddr;
-    uint32_t *gwaddr;
-    //0xFF is stopper
-    while(*options != 0xFF){
-        opt_type = *options++;
-        len = *options++;
-        switch(opt_type){
-            //get subnet mask
-            case 0x01:
-                sbaddr = (uint32_t *)options;
-                break;
-            //get default gateway
-            case 0x03:
-                gwaddr = (uint32_t *)options;
-                break;
-            default:
-                break;
-        }
-        options += len;
-    }
- 
     
     dhcp_get_addr_fromack(ack, &yiaddr, &nmaddr, &gwaddr);
 
