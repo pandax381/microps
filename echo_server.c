@@ -15,11 +15,12 @@ struct microps_param param = {
 };
 */
 struct microps_param param = {
-    .ethernet_device = "en0",
-    .ethernet_addr = "58:55:ca:fb:6e:9f",
-    .ip_addr = "10.13.100.100",
-    .ip_netmask = "255.255.0.0",
-    .ip_gateway = "10.13.0.1"
+    .ethernet_device = "enp0s8",
+    .ethernet_addr = "08:00:27:0c:a1:27",
+    .ip_addr = "0.0.0.0",
+    .ip_netmask = "0.0.0.0",
+    .ip_gateway = NULL,
+    .use_dhcp = 1
 };
 
 int

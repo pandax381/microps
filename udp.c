@@ -196,8 +196,12 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
     }
     pthread_mutex_unlock(&udp.cb.mutex);
     queue_hdr = (struct udp_queue_hdr *)entry->data;
-    *peer = queue_hdr->addr;
-    *port = queue_hdr->port;
+    if (peer) {
+        *peer = queue_hdr->addr;
+    }
+    if (port) {
+        *port = queue_hdr->port;
+    }
     len = MIN(size, queue_hdr->len);
     memcpy(buf, queue_hdr + 1, len);
     free(entry->data);

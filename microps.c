@@ -13,7 +13,7 @@ microps_init (const struct microps_param *param) {
     if (arp_init() == -1) {
         goto ERROR;
     }
-    if (ip_init(param->ip_addr, param->ip_netmask, param->ip_gateway) == -1) {
+    if (ip_init(param->ip_addr, param->ip_netmask, param->ip_gateway, 0) == -1) {
         goto ERROR;
     }
     if (icmp_init() == -1) {
@@ -27,6 +27,11 @@ microps_init (const struct microps_param *param) {
     }
     if (ethernet_device_run() == -1) {
         goto ERROR;
+    }
+    if (param->use_dhcp) {
+        if (dhcp_init(param->ethernet_addr) == -1) {
+	        goto ERROR;
+        }
     }
     return  0;
 ERROR:

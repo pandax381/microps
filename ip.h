@@ -33,6 +33,6 @@ ip_add_protocol (uint8_t protocol, __ip_protocol_handler_t handler);
 extern ssize_t
 ip_output (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
 extern int
-ip_init (const char *addr, const char *netmask, const char *gateway);
+ip_init (const char *addr, const char *netmask, const char *gateway, uint8_t reconfigure);
 
 #endif

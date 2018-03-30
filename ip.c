@@ -148,6 +148,18 @@ ip_route_add (const char *network, const char *netmask, const char *nexthop) {
     return -1;
 }
 
+static void
+ip_route_table_init() {
+    struct ip_route *route;
+    
+    IP_ROUTE_TABLE_FOREACH (route) {
+        route->used = 0;
+        route->network = 0;
+        route->netmask = 0;
+        route->nexthop = 0;
+    }
+}
+
 static int
 ip_route_lookup (const ip_addr_t *dst, ip_addr_t *nexthop) {
     struct ip_route *route, *candidate = NULL;
@@ -377,7 +389,7 @@ ip_output (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *ds
 }
 
 int
-ip_init (const char *addr, const char *netmask, const char *gateway) {
+ip_init (const char *addr, const char *netmask, const char *gateway, uint8_t reconfigure) {
     char network[IP_ADDR_STR_LEN + 1];
 
     if (ip_addr_pton(addr, &ip.unicast) == -1) {
@@ -389,6 +401,10 @@ ip_init (const char *addr, const char *netmask, const char *gateway) {
     ip.network = ip.unicast & ip.netmask;
     ip.broadcast = ip.network & ~ip.netmask;
     ip_addr_ntop(&ip.network, network, sizeof(network));
+    
+    if(reconfigure)
+        ip_route_table_init();
+
     if (ip_route_add(network, netmask, "0.0.0.0") == -1) {
         return -1;
     }
@@ -397,6 +413,10 @@ ip_init (const char *addr, const char *netmask, const char *gateway) {
             return -1;
         }
     }
-    ethernet_add_protocol(ETHERNET_TYPE_IP, ip_input);
+    
+    if (!reconfigure) {
+        ethernet_add_protocol(ETHERNET_TYPE_IP, ip_input);
+    }
+fprintf(stderr, "%s, %s, %s\n", addr, netmask, gateway);
     return 0;
 }
