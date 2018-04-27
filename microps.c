@@ -1,12 +1,21 @@
 #include <stdio.h>
 #include <pthread.h>
 #include "microps.h"
+#ifdef USE_DPDK
+#include "dpdk.h"
+#endif
 
 int
 microps_init (const struct microps_param *param) {
+
     if (ethernet_init() == -1) {
         goto ERROR;
     }
+#ifdef USE_DPDK
+    if (dpdk_init() == -1) {
+        goto ERROR;
+    }
+#endif
     if (ethernet_device_open(param->ethernet_device, param->ethernet_addr) == -1) {
         goto ERROR;
     }
@@ -30,12 +39,12 @@ microps_init (const struct microps_param *param) {
     }
     if (param->use_dhcp) {
         if (dhcp_init(param->ethernet_addr) == -1) {
-	        goto ERROR;
+          goto ERROR;
         }
     }
     return  0;
 ERROR:
-    //microps_cleanup();
+    microps_cleanup();
     return -1;
 }
 
