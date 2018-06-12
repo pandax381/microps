@@ -15,3 +15,6 @@
 *.exe
 *.out
 *.app
+
+echo_server
+build
