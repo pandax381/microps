@@ -70,6 +70,9 @@ queue_push (struct queue_head *queue, void *data, size_t size) {
     entry->data = data;
     entry->size = size;
     entry->next = NULL;
+    if (queue->tail) {
+        queue->tail->next = entry;
+    }
     queue->tail = entry;
     if (!queue->next) {
         queue->next = entry;
