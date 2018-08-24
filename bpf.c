@@ -94,7 +94,7 @@ device_close (device_t *device) {
 }
 
 void
-device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout) {
+device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
     struct pollfd pfd;
     ssize_t length;
     struct bpf_hdr *hdr;
@@ -110,7 +110,7 @@ device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout
     }
     hdr = (struct bpf_hdr *)device->buffer;
     while ((caddr_t)hdr < (caddr_t)device->buffer + length) {
-        callback((uint8_t *)((caddr_t)hdr + hdr->bh_hdrlen), hdr->bh_caplen);
+        callback((uint8_t *)((caddr_t)hdr + hdr->bh_hdrlen), hdr->bh_caplen, arg);
         hdr = (struct bpf_hdr *)((caddr_t)hdr + BPF_WORDALIGN(hdr->bh_hdrlen + hdr->bh_caplen));
     }
 }

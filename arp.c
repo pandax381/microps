@@ -53,7 +53,7 @@ static struct {
 } arp;
 
 static void
-arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst);
+arp_input (uint8_t *packet, size_t plen, void *device);
 
 int
 arp_init (void) {
@@ -92,7 +92,7 @@ arp_table_select (const ip_addr_t *pa, ethernet_addr_t *ha) {
 }
 
 static int
-arp_table_update (const ip_addr_t *pa, const ethernet_addr_t *ha) {
+arp_table_update (struct ethernet_device *device, const ip_addr_t *pa, const ethernet_addr_t *ha) {
     struct arp_entry *entry;
 
     for (entry = arp.table.head; entry; entry = entry->next) {
@@ -101,7 +101,7 @@ arp_table_update (const ip_addr_t *pa, const ethernet_addr_t *ha) {
             time(&entry->timestamp);
             pthread_cond_broadcast(&entry->cond);
             if (entry->data) {
-                ethernet_output(ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, NULL, &entry->ha);
+                ethernet_output(device, ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, &entry->ha);
                 free(entry->data);
                 entry->data = NULL;
                 entry->len = 0;
@@ -156,7 +156,7 @@ arp_table_check_timeout (void) {
 }
 
 static int
-arp_send_request (const ip_addr_t *tpa) {
+arp_send_request (struct ethernet_device *device, const ip_addr_t *tpa) {
     struct arp_ethernet request;
 
     if (!tpa) {
@@ -167,18 +167,18 @@ arp_send_request (const ip_addr_t *tpa) {
     request.hdr.hln = 6;
     request.hdr.pln = 4;
     request.hdr.op = hton16(ARP_OP_REQUEST);
-    ethernet_get_addr(&request.sha);
-    ip_get_addr(&request.spa);
+    ethernet_device_addr(device, &request.sha);
+    ip_get_addr(device, &request.spa);
     memset(&request.tha, 0, ETHERNET_ADDR_LEN);
     request.tpa = *tpa;
-    if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), NULL, &ETHERNET_ADDR_BCAST) < 0) {
+    if (ethernet_output(device, ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), &ETHERNET_ADDR_BCAST) < 0) {
         return -1;
     }
     return  0;
 }
 
 static int
-arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
+arp_send_reply (struct ethernet_device *device, const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
     struct arp_ethernet reply;
 
     if (!tha || !tpa) {
@@ -189,23 +189,22 @@ arp_send_reply (const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet
     reply.hdr.hln = 6;
     reply.hdr.pln = 4;
     reply.hdr.op = hton16(ARP_OP_REPLY);
-    ethernet_get_addr(&reply.sha);
-    ip_get_addr(&reply.spa);
+    ethernet_device_addr(device, &reply.sha);
+    ip_get_addr(device, &reply.spa);
     reply.tha = *tha;
     reply.tpa = *tpa;
-    if (ethernet_output(ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), NULL, dst) < 0) {
+    if (ethernet_output(device, ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), dst) < 0) {
         return -1;
     }
     return 0;
 }
 
 static void
-arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *dst) {
+arp_input (uint8_t *packet, size_t plen, void *device) {
     struct arp_ethernet *message;
     time_t timestamp;
     int marge = 0;
 
-    (void)dst;
     if (plen < sizeof(struct arp_ethernet)) {
         return;
     }
@@ -228,22 +227,22 @@ arp_input (uint8_t *packet, size_t plen, ethernet_addr_t *src, ethernet_addr_t *
         arp.timestamp = timestamp;
         arp_table_check_timeout();
     }
-    marge = (arp_table_update(&message->spa, &message->sha) == 0) ? 1 : 0;
+    marge = (arp_table_update(device, &message->spa, &message->sha) == 0) ? 1 : 0;
     pthread_mutex_unlock(&arp.mutex);
-    if (message->tpa == ip_get_addr(NULL)) {
+    if (message->tpa == ip_get_addr(device, NULL)) {
         if (!marge) {
             pthread_mutex_lock(&arp.mutex);
             arp_table_insert(&message->spa, &message->sha);
             pthread_mutex_unlock(&arp.mutex);
         }
         if (ntoh16(message->hdr.op) == ARP_OP_REQUEST) {
-            arp_send_reply(&message->sha, &message->spa, src);
+            arp_send_reply(device, &message->sha, &message->spa, &message->sha);
         }
     }
 }
 
 int
-arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t len) {
+arp_resolve (struct ethernet_device *device, const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t len) {
     struct arp_entry *entry;
 
     pthread_mutex_lock(&arp.mutex);
@@ -272,7 +271,7 @@ arp_resolve (const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t 
     arp.table.head = entry;
     entry->pa = *pa;
     time(&entry->timestamp);
-    arp_send_request(pa);
+    arp_send_request(device, pa);
     pthread_mutex_unlock(&arp.mutex);
     return  0;
 }

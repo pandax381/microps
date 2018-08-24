@@ -9,6 +9,7 @@
 #include "arp.h"
 #include "util.h"
 
+#define ETHERNET_DEVICE_TABLE_SIZE 4
 #define ETHERNET_PROTOCOL_TABLE_SIZE 8
 
 struct ethernet_hdr {
@@ -18,22 +19,32 @@ struct ethernet_hdr {
 } __attribute__ ((packed));
 
 struct ethernet_protocol {
+    uint8_t used;
     uint16_t type;
-    void (*callback)(uint8_t *, size_t, ethernet_addr_t *, ethernet_addr_t *);
-    struct ethernet_protocol *next;
+    void (*callback)(uint8_t *, size_t, void *);
+};
+
+struct ethernet_device {
+    uint8_t used;
+    device_t *device;
+    ethernet_addr_t addr;
+    pthread_t thread;
 };
 
 static struct {
-    ethernet_addr_t addr;
-    device_t *device;
     int terminate;
-    pthread_t thread;
-    struct {
-        struct ethernet_protocol table[ETHERNET_PROTOCOL_TABLE_SIZE];
-        struct ethernet_protocol *head;
-        struct ethernet_protocol *pool;
-    } protocol;
+    struct ethernet_device device_table[ETHERNET_DEVICE_TABLE_SIZE];
+    struct ethernet_protocol protocol_table[ETHERNET_PROTOCOL_TABLE_SIZE];
 } ethernet;
+
+#define ETHERNET_DEVICE_TABLE_FOREACH(x) \
+    for (x = ethernet.device_table; x != ethernet.device_table + ETHERNET_DEVICE_TABLE_SIZE; x++)
+#define ETHERNET_DEVICE_TABLE_OFFSET(x) \
+    ((x - ethernet.device_table) / sizeof(*x))
+#define ETHERNET_PROTOCOL_TABLE_FOREACH(x) \
+    for (x = ethernet.protocol_table; x != ethernet.protocol_table + ETHERNET_PROTOCOL_TABLE_SIZE; x++)
+#define ETHERNET_PROTOCOL_TABLE_OFFSET(x) \
+    ((x - ethernet.protocol_table) / sizeof(*x))
 
 const ethernet_addr_t ETHERNET_ADDR_BCAST = {"\xff\xff\xff\xff\xff\xff"};
 
@@ -72,136 +83,134 @@ ethernet_addr_ntop (const ethernet_addr_t *n, char *p, size_t size) {
 
 int
 ethernet_init (void) {
-    int index;
-    struct ethernet_protocol *protocol;
+    struct ethernet_device *device;
 
-    memset(&ethernet.addr, 0, sizeof(ethernet.addr));
-    ethernet.device = NULL;
     ethernet.terminate = 0;
-    ethernet.thread = pthread_self();
-    for (index = 0; index < ETHERNET_PROTOCOL_TABLE_SIZE; index++) {
-        protocol = ethernet.protocol.table + index;
-        protocol->type = 0;
-        protocol->callback = NULL;
-        protocol->next = (index != ETHERNET_PROTOCOL_TABLE_SIZE) ? (protocol + 1) : NULL;
+    ETHERNET_DEVICE_TABLE_FOREACH(device) {
+        device->thread = pthread_self();
     }
-    ethernet.protocol.head = NULL;
-    ethernet.protocol.pool = ethernet.protocol.table;
     return 0;
-}
-
-ethernet_addr_t *
-ethernet_get_addr (ethernet_addr_t *dst) {
-    return memcpy(dst, &ethernet.addr, sizeof(ethernet_addr_t));
 }
 
 int
-ethernet_add_protocol (uint16_t type, void (*callback)(uint8_t *, size_t, ethernet_addr_t *, ethernet_addr_t *)) {
+ethernet_add_protocol (uint16_t type, void (*callback)(uint8_t *, size_t, void *)) {
     struct ethernet_protocol *protocol;
 
-    protocol = ethernet.protocol.pool;
-    if (!protocol) {
+    ETHERNET_PROTOCOL_TABLE_FOREACH(protocol) {
+        if (!protocol->used) {
+            protocol->used = 1;
+            protocol->type = hton16(type);
+            protocol->callback = callback;
+            break;
+        }
+    }
+    if (ETHERNET_PROTOCOL_TABLE_OFFSET(protocol) == ETHERNET_PROTOCOL_TABLE_SIZE) {
         return -1;
     }
-    protocol->type = hton16(type);
-    protocol->callback = callback;
-    ethernet.protocol.pool = protocol->next;
-    protocol->next = ethernet.protocol.head;
-    ethernet.protocol.head = protocol;
     return 0;
 }
 
-void
-ethernet_input (uint8_t *frame, size_t flen) {
+static void
+ethernet_input (uint8_t *frame, size_t flen, void *arg) {
+    struct ethernet_device *device;
     struct ethernet_hdr *hdr;
     uint8_t *payload;
     size_t plen;
     struct ethernet_protocol *protocol;
 
+    device = (struct ethernet_device *)arg;
     if (flen < (ssize_t)sizeof(struct ethernet_hdr)) {
         return;
     }
     hdr = (struct ethernet_hdr *)frame;
-    if (memcmp(&ethernet.addr, &hdr->dst, sizeof(ethernet_addr_t)) != 0) {
+    if (memcmp(&device->addr, &hdr->dst, sizeof(ethernet_addr_t)) != 0) {
         if (memcmp(&ETHERNET_ADDR_BCAST, &hdr->dst, sizeof(ethernet_addr_t)) != 0) {
             return;
         }
     }
     payload = (uint8_t *)(hdr + 1);
     plen = flen - sizeof(struct ethernet_hdr);
-    for (protocol = ethernet.protocol.head; protocol; protocol = protocol->next) {
-        if (protocol->type == hdr->type) {
-            return protocol->callback(payload, plen, &hdr->src, &hdr->dst);
+    ETHERNET_PROTOCOL_TABLE_FOREACH(protocol) {
+        if (protocol->used && protocol->type == hdr->type) {
+            return protocol->callback(payload, plen, device);
         }
     }
 }
 
 ssize_t
-ethernet_output (uint16_t type, const uint8_t *payload, size_t plen, const void *paddr, const ethernet_addr_t *dst) {
-    ethernet_addr_t hwaddr;
-    int ret;
+ethernet_output (struct ethernet_device *device, uint16_t type, const uint8_t *payload, size_t plen, const ethernet_addr_t *dst) {
     uint8_t frame[ETHERNET_FRAME_SIZE_MAX];
     struct ethernet_hdr *hdr;
     size_t flen;
 
-    if (!payload || plen > ETHERNET_PAYLOAD_SIZE_MAX || (!paddr && !dst)) {
+    if (!payload || plen > ETHERNET_PAYLOAD_SIZE_MAX || (!dst)) {
         return -1;
-    }
-    if (paddr) {
-        ret = arp_resolve(paddr, &hwaddr, payload, plen);
-        if (ret != 1) {
-            return ret;
-        }
-        dst = &hwaddr;
     }
     memset(frame, 0, sizeof(frame));
     hdr = (struct ethernet_hdr *)frame;
     memcpy(hdr->dst.addr, dst->addr, ETHERNET_ADDR_LEN);
-    memcpy(hdr->src.addr, ethernet.addr.addr, ETHERNET_ADDR_LEN);
+    memcpy(hdr->src.addr, device->addr.addr, ETHERNET_ADDR_LEN);
     hdr->type = hton16(type);
     memcpy(hdr + 1, payload, plen);
     flen = sizeof(struct ethernet_hdr) + (plen < ETHERNET_PAYLOAD_SIZE_MIN ? ETHERNET_PAYLOAD_SIZE_MIN : plen);
-    return device_output(ethernet.device, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
+    return device_output(device->device, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
 }
 
-int
+struct ethernet_device *
 ethernet_device_open (const char *name, const char *addr) {
-    if (ethernet_addr_pton(addr, &ethernet.addr) == -1) {
-        return -1;
+    struct ethernet_device *device;
+
+    ETHERNET_DEVICE_TABLE_FOREACH(device) {
+        if (!device->used) {
+            if (ethernet_addr_pton(addr, &device->addr) == -1) {
+                return NULL;
+            }
+            device->device = device_open(name);
+            if (!device->device) {
+                return NULL;
+            }
+            device->used = 1;
+            return device;
+        }
     }
-    if ((ethernet.device = device_open(name)) == NULL) {
-        return -1;
-    }
-    return 0;
+    return NULL;
 }
 
 void
-ethernet_device_close (void) {
-    if (!pthread_equal(ethernet.thread, pthread_self())) {
+ethernet_device_close (struct ethernet_device *device) {
+    if (!device) {
+        return;
+    }
+    if (!pthread_equal(device->thread, pthread_self())) {
         ethernet.terminate = 1;
-        pthread_join(ethernet.thread, NULL);
+        pthread_join(device->thread, NULL);
     }
-    if (ethernet.device) {
-        device_close(ethernet.device);
+    if (device->device) {
+        device_close(device->device);
     }
+}
+
+ethernet_addr_t *
+ethernet_device_addr (struct ethernet_device *device, ethernet_addr_t *dst) {
+    return memcpy(dst, &device->addr, sizeof(ethernet_addr_t));
 }
 
 void *
 ethernet_device_input_thread (void *arg) {
-    device_t *device;
+    struct ethernet_device *device;
 
-    device = (device_t *)arg;
+    device = (struct ethernet_device *)arg;
     while (!ethernet.terminate) {
-        device_input(device, ethernet_input, 1000);
+        device_input(device->device, ethernet_input, device, 1000);
     }
     return NULL;
 }
 
 int
-ethernet_device_run (void) {
+ethernet_device_run (struct ethernet_device *device) {
     int err;
 
-    if ((err = pthread_create(&ethernet.thread, NULL, ethernet_device_input_thread, ethernet.device)) != 0) {
+    if ((err = pthread_create(&device->thread, NULL, ethernet_device_input_thread, device)) != 0) {
         fprintf(stderr, "pthread_create: error, code=%d\n", err);
         return -1;
     }

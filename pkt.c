@@ -84,7 +84,7 @@ device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout
     if (length <= 0) {
         return;
     }
-    callback(buffer, length);
+    callback(buffer, length, device);
 }
 
 ssize_t

@@ -25,6 +25,7 @@ struct udp_queue_hdr {
 
 struct udp_cb {
     int used;
+    struct ip_interface *iface;
     uint16_t port;
     struct queue_head queue;
     pthread_cond_t cond;
@@ -43,11 +44,11 @@ static struct {
     ((x - udp.cb.table) / sizeof(*x))
 
 static ssize_t
-udp_output (uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
+udp_output (struct ip_interface *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     char packet[65536];
     struct udp_hdr *hdr;
-    uint32_t pseudo = 0;
     ip_addr_t self;
+    uint32_t pseudo = 0;
 
     hdr = (struct udp_hdr *)packet;
     hdr->sport = sport;
@@ -55,7 +56,7 @@ udp_output (uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t 
     hdr->len = hton16(sizeof(struct udp_hdr) + len);
     hdr->sum = 0;
     memcpy(hdr + 1, buf, len);
-    ip_get_addr(&self);
+    self = ip_interface_addr(iface);
     pseudo += (self >> 16) & 0xffff;
     pseudo += self & 0xffff;
     pseudo += (*peer >> 16) & 0xffff;
@@ -63,11 +64,11 @@ udp_output (uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t 
     pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
     pseudo += hton16(sizeof(struct udp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct udp_hdr) + len, pseudo);
-    return ip_output(IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
+    return ip_output(iface, IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
 }
 
 static void
-udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst) {
+udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
     struct udp_hdr *hdr;
     uint32_t pseudo = 0;
     struct udp_cb *cb;
@@ -89,7 +90,7 @@ udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst) {
     }
     pthread_mutex_lock(&udp.cb.mutex);
     UDP_CB_TABLE_FOREACH (cb) {
-        if (cb->used && cb->port == hdr->dport) {
+        if (cb->used && (!cb->iface || cb->iface == iface) && cb->port == hdr->dport) {
             data = malloc(sizeof(struct udp_queue_hdr) + (len - sizeof(struct udp_hdr)));
             if (!data) {
                 pthread_mutex_unlock(&udp.cb.mutex);
@@ -152,7 +153,40 @@ udp_api_close (int soc) {
 }
 
 int
-udp_api_bind (int soc, uint16_t port) {
+udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
+    struct udp_cb *cb, *tmp;
+    struct ip_interface *iface = NULL;
+
+    if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
+        return -1;
+    }
+    pthread_mutex_lock(&udp.cb.mutex);
+    cb = &udp.cb.table[soc];
+    if (!cb->used) {
+        pthread_mutex_unlock(&udp.cb.mutex);
+        return -1;
+    }
+    if (addr && *addr) {
+        iface = ip_get_interface_by_addr(addr);
+        if (!iface) {
+            pthread_mutex_unlock(&udp.cb.mutex);
+            return -1;
+        }
+    }
+    UDP_CB_TABLE_FOREACH (tmp) {
+        if (tmp->used && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
+            pthread_mutex_unlock(&udp.cb.mutex);
+            return -1;
+        }
+    }
+    cb->iface = iface;
+    cb->port = port;
+    pthread_mutex_unlock(&udp.cb.mutex);
+    return 0;
+}
+
+int
+udp_api_bind_interface (int soc, struct ip_interface *iface, uint16_t port) {
     struct udp_cb *cb, *tmp;
 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
@@ -165,11 +199,12 @@ udp_api_bind (int soc, uint16_t port) {
         return -1;
     }
     UDP_CB_TABLE_FOREACH (tmp) {
-        if (tmp->used && tmp->port == port) {
+        if (tmp->used && (!tmp->iface || tmp->iface == iface) && tmp->port == port) {
             pthread_mutex_unlock(&udp.cb.mutex);
             return -1;
         }
     }
+    cb->iface = iface;
     cb->port = port;
     pthread_mutex_unlock(&udp.cb.mutex);
     return 0;
@@ -212,6 +247,7 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
 ssize_t
 udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     struct udp_cb *cb, *tmp;
+    struct ip_interface *iface;
     uint16_t p, sport;
 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
@@ -223,10 +259,18 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
         pthread_mutex_unlock(&udp.cb.mutex);
         return -1;
     }
+    iface = cb->iface;
+    if (!iface) {
+        iface = ip_get_interface_by_peer(peer);
+        if (!iface) {
+            pthread_mutex_unlock(&udp.cb.mutex);
+            return -1;
+        }
+    }
     if (!cb->port) {
         for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
             UDP_CB_TABLE_FOREACH (tmp) {
-                if (tmp->port == hton16(p)) {
+                if (tmp->port == hton16(p) && (!tmp->iface || tmp->iface == iface)) {
                     break;
                 }
             }
@@ -242,7 +286,7 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     }
     sport = cb->port;
     pthread_mutex_unlock(&udp.cb.mutex);
-    return udp_output(sport, buf, len, peer, port);
+    return udp_output(iface, sport, buf, len, peer, port);
 }
 
 int
@@ -250,10 +294,6 @@ udp_init (void) {
     struct udp_cb *cb;
 
     UDP_CB_TABLE_FOREACH (cb) {
-        cb->used = 0;
-        cb->port = 0;
-        cb->queue.next = NULL;
-        cb->queue.tail = NULL;
         pthread_cond_init(&cb->cond, NULL);
     }
     pthread_mutex_init(&udp.cb.mutex, NULL);
