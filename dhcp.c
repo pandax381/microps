@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include "ethernet.h"
 #include "ip.h"
 #include "udp.h"
@@ -42,7 +43,7 @@ dhcp_debug_message(const struct dhcp *p, size_t n) {
 
     fprintf(stderr, "========== DHCP Message Debug Print ==========\n");
     if (!p || n < DHCP_MESSAGE_MIN_LEN) {
-        fprintf(stderr, "Invalid DHCP message (%d:%d)\n", DHCP_MESSAGE_MIN_LEN, n);
+        fprintf(stderr, "Invalid DHCP message (%lu:%zu)\n", DHCP_MESSAGE_MIN_LEN, n);
         return;
     }
     fprintf(stderr, "    op: %x\n", p->op);
@@ -59,8 +60,9 @@ dhcp_debug_message(const struct dhcp *p, size_t n) {
     fprintf(stderr, "chaddr: %s\n", ethernet_addr_ntop((ethernet_addr_t *)p->chaddr, chaddr, sizeof(chaddr)));
     fprintf(stderr, " sname: %.64s\n", p->sname);
     fprintf(stderr, "  file: %.128s\n", p->file);
-    opt = p->options;
-    fprintf(stderr, " magic: %02x %02x %02x %02x\n", *opt++, *opt++, *opt++, *opt++);
+    opt = (uint8_t *)p->options;
+    fprintf(stderr, " magic: %02x %02x %02x %02x\n", opt[0], opt[1], opt[2], opt[3]);
+    opt += 4;
     while (*opt != 0xff) {
         fprintf(stderr, "option[%02x]", *opt++);
         for (len = *opt++; len; len--) {
@@ -69,14 +71,14 @@ dhcp_debug_message(const struct dhcp *p, size_t n) {
         fprintf(stderr, "\n");
     }
     fprintf(stderr, "option:[%02x]\n", *opt++);
-    fprintf(stderr, "total %d bytes (padding %d bytes)\n", n, n - (opt - (uint8_t *)p));
+    fprintf(stderr, "total %zu bytes (padding %lu bytes)\n", n, n - (opt - (uint8_t *)p));
 }
 
 static void
 dhcp_build_discover(struct dhcp *discover, ethernet_addr_t eth, uint32_t xid) {
-    uint8_t *opt;    
+    uint8_t *opt;
 
-    // add discover packet info    
+    // add discover packet info
     discover->op = 0x01;
     discover->htype = 0x01;
     discover->hlen = 0x06;
@@ -106,7 +108,7 @@ dhcp_build_discover(struct dhcp *discover, ethernet_addr_t eth, uint32_t xid) {
 
 static void
 dhcp_build_request(struct dhcp *request, ethernet_addr_t eth, uint32_t yiaddr, uint32_t siaddr, uint32_t xid) {
-    uint8_t *opt;    
+    uint8_t *opt;
 
     request->op = 0x01;
     request->htype = 0x01;
@@ -147,7 +149,7 @@ dhcp_get_addr_fromack(struct dhcp *ack, uint32_t *addr, uint32_t *netmask, uint3
     size_t len;
     uint8_t *options = ack->options;
     uint8_t opt_type;
-    
+
     *addr = ack->yiaddr;
     // skip magic
     options += 4;
@@ -174,10 +176,10 @@ dhcp_recv_message(int sock, uint8_t *buf, size_t size, uint32_t xid, uint8_t *ty
     int len;
     struct dhcp *msg;
     uint8_t *opt;
-    
+
     while (1) {
         len = udp_api_recvfrom(sock, buf, size, NULL, NULL);
-        if (len < DHCP_MESSAGE_MIN_LEN) {
+        if (len < (int)DHCP_MESSAGE_MIN_LEN) {
             continue;
         }
         msg = (struct dhcp *)buf;
@@ -214,9 +216,9 @@ dhcp_recv_message(int sock, uint8_t *buf, size_t size, uint32_t xid, uint8_t *ty
 }
 
 int
-dhcp_init(char *ethernet_addr) { 
+dhcp_init(struct ip_interface *iface) {
     int res, sock, len;
-    uint8_t *opt, kind;
+    uint8_t kind;
     uint8_t sbuf[DHCP_MESSAGE_MIN_LEN];
     uint8_t rbuf[DHCP_MESSAGE_BUF_LEN];
     uint32_t yiaddr, siaddr, nmaddr, gwaddr;
@@ -226,20 +228,21 @@ dhcp_init(char *ethernet_addr) {
     ethernet_addr_t eth_addr;
     ip_addr_t peer;
     uint16_t peer_port = hton16(DHCP_SERVER_PORT);
-    
+
     sock = udp_api_open();
     if (sock < 0) {
         fprintf(stderr, "udp sock open failed.\n");
         goto ERROR;
     }
 
-    res = udp_api_bind(sock, hton16(DHCP_CLIENT_PORT));
+    res = udp_api_bind_interface(sock, iface, hton16(DHCP_CLIENT_PORT));
     if (res < 0) {
         fprintf(stderr, "udp sock bind failed.\n");
         goto ERROR;
     }
-    
-    ethernet_addr_pton(ethernet_addr, &eth_addr);
+
+    ethernet_device_addr(ip_interface_device(iface), &eth_addr);
+
     peer = IP_ADDR_BCAST;
 
     memset(sbuf, 0x00, sizeof(sbuf));
@@ -250,7 +253,7 @@ dhcp_init(char *ethernet_addr) {
 #endif
 
     // send discover
-    len = udp_api_sendto(sock, sbuf, sizeof(sbuf), &peer, peer_port);  
+    len = udp_api_sendto(sock, sbuf, sizeof(sbuf), &peer, peer_port);
     if (len < 0) {
         goto ERROR;
     }
@@ -258,7 +261,6 @@ dhcp_init(char *ethernet_addr) {
     kind = 0x02;
     len = dhcp_recv_message(sock, rbuf, sizeof(rbuf), xid, &kind);
 
-    
     offer = (struct dhcp *)rbuf;
 #ifdef DEBUG
     dhcp_debug_message(offer, len);
@@ -293,19 +295,17 @@ dhcp_init(char *ethernet_addr) {
     ack = (struct dhcp *)rbuf;
 #ifdef DEBUG
     dhcp_debug_message(ack, len);
-#endif 
-   
+#endif
     udp_api_close(sock);
 
-    
     dhcp_get_addr_fromack(ack, &yiaddr, &nmaddr, &gwaddr);
 
     ip_addr_ntop(&yiaddr, addr, sizeof(addr));
-    ip_addr_ntop(&nmaddr, netmask, sizeof(netmask)); 
+    ip_addr_ntop(&nmaddr, netmask, sizeof(netmask));
     ip_addr_ntop(&gwaddr, gateway, sizeof(gateway));
-    ip_init(addr, netmask, gateway, 1); 
+    ip_init();
     return 0;
-ERROR:  
+ERROR:
     if (sock != -1) {
         udp_api_close(sock);
     }

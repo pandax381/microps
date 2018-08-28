@@ -5,15 +5,15 @@
 #include <sys/types.h>
 #include "microps.h"
 
-/*
 struct microps_param param = {
-    .ethernet_device = "en2",
-    .ethernet_addr = "00:1f:5b:fe:ef:cd",
-    .ip_addr = "10.10.2.228",
-    .ip_netmask = "255.255.0.0",
-    .ip_gateway = "10.10.0.1"
+    .ethernet_device = "en4",
+    .ethernet_addr = "38:c9:86:24:63:49",
+    .ip_addr = "10.50.39.249",
+    .ip_netmask = "255.255.248.0",
+    .ip_gateway = "10.50.32.1"
 };
 
+/*
 struct microps_param param = {
     .ethernet_device = "enp0s8",
     .ethernet_addr = "08:00:27:0c:a1:27",
@@ -23,6 +23,7 @@ struct microps_param param = {
     .use_dhcp = 1
 };
 */
+/*
 struct microps_param param = {
     .ethernet_device = "0",
     .ethernet_addr = "00:1f:5b:fe:ef:cd",
@@ -31,9 +32,41 @@ struct microps_param param = {
     .ip_gateway = NULL,
     .use_dhcp = 0
 };
+*/
+
+#define UDP_ECHO_SERVER_PORT 7
 
 int
 main (int argc, char *argv[]) {
+/*
+    int soc = -1, ret;
+    uint8_t buf[65535];
+    ip_addr_t peer_addr;
+    uint16_t peer_port;
+    char addr[IP_ADDR_STR_LEN + 1];
+
+    if (microps_init(&param) == -1) {
+        goto ERROR;
+    }
+    soc = udp_api_open();
+    if (soc == -1) {
+        goto ERROR;
+    }
+    if (udp_api_bind(soc, NULL, hton16(UDP_ECHO_SERVER_PORT)) == -1) {
+        goto ERROR;
+    }
+    while (1) {
+        ret = udp_api_recvfrom(soc, buf, sizeof(buf), &peer_addr, &peer_port);
+        if (ret <= 0) {
+            break;
+        }
+        fprintf(stderr, "receive message, from %s:%d\n",
+            ip_addr_ntop(&peer_addr, addr, sizeof(addr)) ,ntoh16(peer_port));
+        hexdump(stderr, buf, ret);
+        udp_api_sendto(soc, buf, ret, &peer_addr, peer_port);
+    }
+    udp_api_close(soc);
+*/
     int soc = -1, acc;
     uint8_t buf[65536];
     ssize_t len;
@@ -79,8 +112,8 @@ fprintf(stderr, "accept success, soc=%d, acc=%d\n", soc, acc);
         }
         //hexdump(stderr, buf, len);
     }
-*/
     tcp_api_close(soc);
+*/
     microps_cleanup();
     return  0;
 ERROR:

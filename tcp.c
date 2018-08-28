@@ -62,6 +62,7 @@ struct tcp_txq_head {
 struct tcp_cb {
     uint8_t used;
     uint8_t state;
+    struct ip_interface *iface;
     uint16_t port;
     struct {
         ip_addr_t addr;
@@ -157,7 +158,7 @@ tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t 
     hdr->sum = 0;
     hdr->urg = 0;
     memcpy(hdr + 1, buf, len);
-    ip_get_addr(&self);
+    self = ip_interface_addr(cb->iface);
     peer = cb->peer.addr;
     pseudo += (self >> 16) & 0xffff;
     pseudo += self & 0xffff;
@@ -166,7 +167,7 @@ tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t 
     pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
     pseudo += hton16(sizeof(struct tcp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct tcp_hdr) + len, pseudo);
-    ip_output(IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
+    ip_output(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
     tcp_txq_add(cb, hdr, sizeof(struct tcp_hdr) + len);
     return len;
 }
@@ -190,7 +191,7 @@ tcp_timer_thread (void *arg) {
                 if (txq->segment->seq >= hton32(cb->snd.una)) {
                     if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
                         peer = cb->peer.addr;
-                        ip_output(IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
+                        ip_output(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
                         txq->timestamp = timestamp;
                     }
                 } else {
@@ -399,12 +400,12 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
 }
 
 static void
-tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst) {
+tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
     struct tcp_hdr *hdr;
     uint32_t pseudo = 0;
     struct tcp_cb *cb, *fcb = NULL, *lcb = NULL;
 
-    if (*dst != ip_get_addr(NULL)) {
+    if (*dst != ip_interface_addr(iface)) {
         return;
     }
     if (len < sizeof(struct tcp_hdr)) {
@@ -427,7 +428,7 @@ tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst) {
                 fcb = cb;
             }
         }
-        else if (cb->port == hdr->dst) {
+        else if ((!cb->iface || cb->iface == iface) && cb->port == hdr->dst) {
             if (cb->peer.addr == *src && cb->peer.port == hdr->src) {
                 break;
             }
@@ -445,6 +446,7 @@ tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst) {
         cb = fcb;
         cb->used = 1;
         cb->state = lcb->state;
+        cb->iface = iface;
         cb->port = lcb->port;
         cb->peer.addr = *src;
         cb->peer.port = hdr->src;

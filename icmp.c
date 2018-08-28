@@ -20,16 +20,21 @@ struct icmp_echo {
     uint8_t data[0];
 };
 
+static void
+icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface);
+
 int
 icmp_init (void) {
     ip_add_protocol(IP_PROTOCOL_ICMP, icmp_recv);
     return 0;
 }
 
-void
-icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst) {
+static void
+icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
     struct icmp_hdr *hdr;
 
+char buf[128];
+fprintf(stderr, "icmp_recv, src=%s\n", ip_addr_ntop(src, buf, sizeof(buf)));
     (void)dst;
     if (plen < sizeof(struct icmp_hdr)) {
         return;
@@ -39,6 +44,6 @@ icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst) {
         hdr->type = ICMP_TYPE_ECHO_REPLY;
         hdr->sum = 0;
         hdr->sum = cksum16((uint16_t *)hdr, plen, 0);
-        ip_output(IP_PROTOCOL_ICMP, packet, plen, src);
+        ip_output(iface, IP_PROTOCOL_ICMP, packet, plen, src);
     }
 }

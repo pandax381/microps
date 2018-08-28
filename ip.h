@@ -18,7 +18,9 @@
 
 typedef uint32_t ip_addr_t;
 
-typedef void (*__ip_protocol_handler_t)(uint8_t *, size_t, ip_addr_t *, ip_addr_t *);
+struct ip_interface;
+
+typedef void (*__ip_protocol_handler_t)(uint8_t *, size_t, ip_addr_t *, ip_addr_t *, struct ip_interface *);
 
 extern const ip_addr_t IP_ADDR_BCAST;
 
@@ -27,12 +29,24 @@ ip_addr_pton (const char *p, ip_addr_t *n);
 extern char *
 ip_addr_ntop (const ip_addr_t *n, char *p, size_t size);
 extern ip_addr_t
-ip_get_addr (ip_addr_t *dst);
+ip_get_addr (void *device, ip_addr_t *dst);
+extern struct ip_interface *
+ip_get_interface_by_addr (ip_addr_t *addr);
+extern struct ip_interface *
+ip_get_interface_by_peer (ip_addr_t *peer);
+extern void *
+ip_get_device(struct ip_interface *);
+extern void *
+ip_interface_device (struct ip_interface *iface);
+extern ip_addr_t
+ip_interface_addr (struct ip_interface *iface);
 extern int
 ip_add_protocol (uint8_t protocol, __ip_protocol_handler_t handler);
 extern ssize_t
-ip_output (uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
+ip_output (struct ip_interface *iface, uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
+extern struct ip_interface *
+ip_register_interface (void *device, const char *addr, const char *netmask, const char *gateway);
 extern int
-ip_init (const char *addr, const char *netmask, const char *gateway, uint8_t reconfigure);
+ip_init (void);
 
 #endif
