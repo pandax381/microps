@@ -69,7 +69,7 @@ device_close (device_t *device) {
 }
 
 void
-device_input (device_t *device, void (*callback)(uint8_t *, size_t), int timeout) {
+device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), void *args, int timeout) {
     struct pollfd pfd;
     ssize_t ret, length;
     uint8_t buffer[2048];
