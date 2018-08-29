@@ -135,7 +135,7 @@ device_close (device_t *device) {
 }
 
 void
-device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), int timeout) {
+device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
     uint16_t nb_ports;
     uint16_t port = device->port;
     struct rte_mbuf *bufs[BURST_SIZE];
@@ -149,7 +149,7 @@ device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), int
         uint8_t *p = rte_pktmbuf_mtod(bufs[i], uint8_t*);
         size_t size = rte_pktmbuf_pkt_len(bufs[i]);
 
-        callback(p, size, device);
+        callback(p, size, arg);
     }
 }
 
