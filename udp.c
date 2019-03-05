@@ -1,9 +1,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <unistd.h>
+#include <errno.h>
 #include <pthread.h>
-#include "udp.h"
+#include <sys/time.h>
 #include "util.h"
+#include "udp.h"
 
 #define UDP_CB_TABLE_SIZE 16
 #define UDP_SOURCE_PORT_MIN 49152
@@ -25,7 +30,7 @@ struct udp_queue_hdr {
 
 struct udp_cb {
     int used;
-    struct ip_interface *iface;
+    struct netif *iface;
     uint16_t port;
     struct queue_head queue;
     pthread_cond_t cond;
@@ -44,7 +49,7 @@ static struct {
     ((x - udp.cb.table) / sizeof(*x))
 
 static ssize_t
-udp_output (struct ip_interface *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
+udp_tx (struct netif *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     char packet[65536];
     struct udp_hdr *hdr;
     ip_addr_t self;
@@ -56,7 +61,7 @@ udp_output (struct ip_interface *iface, uint16_t sport, uint8_t *buf, size_t len
     hdr->len = hton16(sizeof(struct udp_hdr) + len);
     hdr->sum = 0;
     memcpy(hdr + 1, buf, len);
-    self = ip_interface_addr(iface);
+    self = ((struct netif_ip *)iface)->unicast;
     pseudo += (self >> 16) & 0xffff;
     pseudo += self & 0xffff;
     pseudo += (*peer >> 16) & 0xffff;
@@ -64,11 +69,11 @@ udp_output (struct ip_interface *iface, uint16_t sport, uint8_t *buf, size_t len
     pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
     pseudo += hton16(sizeof(struct udp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct udp_hdr) + len, pseudo);
-    return ip_output(iface, IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
+    return ip_tx(iface, IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
 }
 
 static void
-udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
+udp_rx (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *iface) {
     struct udp_hdr *hdr;
     uint32_t pseudo = 0;
     struct udp_cb *cb;
@@ -86,6 +91,7 @@ udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_i
     pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
     pseudo += hton16(len);
     if (cksum16((uint16_t *)hdr, len, pseudo) != 0) {
+        fprintf(stderr, "udp checksum error\n");
         return;
     }
     pthread_mutex_lock(&udp.cb.mutex);
@@ -102,7 +108,7 @@ udp_input (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_i
             queue_hdr->len = len - sizeof(struct udp_hdr);
             memcpy(queue_hdr + 1, hdr + 1, len - sizeof(struct udp_hdr));
             queue_push(&cb->queue, data, sizeof(struct udp_queue_hdr) + (len - sizeof(struct udp_hdr)));
-            pthread_cond_signal(&cb->cond);
+            pthread_cond_broadcast(&cb->cond);
             pthread_mutex_unlock(&udp.cb.mutex);
             return;
         }
@@ -155,7 +161,7 @@ udp_api_close (int soc) {
 int
 udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
     struct udp_cb *cb, *tmp;
-    struct ip_interface *iface = NULL;
+    struct netif *iface = NULL;
 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
@@ -167,7 +173,7 @@ udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
         return -1;
     }
     if (addr && *addr) {
-        iface = ip_get_interface_by_addr(addr);
+        iface = ip_netif_by_addr(addr);
         if (!iface) {
             pthread_mutex_unlock(&udp.cb.mutex);
             return -1;
@@ -186,7 +192,7 @@ udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
 }
 
 int
-udp_api_bind_interface (int soc, struct ip_interface *iface, uint16_t port) {
+udp_api_bind_iface (int soc, struct netif *iface, uint16_t port) {
     struct udp_cb *cb, *tmp;
 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
@@ -211,9 +217,12 @@ udp_api_bind_interface (int soc, struct ip_interface *iface, uint16_t port) {
 }
 
 ssize_t
-udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t *port) {
+udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t *port, int timeout) {
     struct udp_cb *cb;
     struct queue_entry *entry;
+    struct timeval tv;
+    struct timespec ts;
+    int ret = 0;
     ssize_t len;
     struct udp_queue_hdr *queue_hdr;
 
@@ -226,10 +235,20 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
         pthread_mutex_unlock(&udp.cb.mutex);
         return -1;
     }
-    while ((entry = queue_pop(&cb->queue)) == NULL) {
-        pthread_cond_wait(&cb->cond, &udp.cb.mutex);
+    gettimeofday(&tv, NULL);
+    while ((entry = queue_pop(&cb->queue)) == NULL && ret != ETIMEDOUT) {
+        if (timeout != -1) {
+            ts.tv_sec = tv.tv_sec + timeout;
+            ts.tv_nsec = tv.tv_usec * 1000;
+            ret = pthread_cond_timedwait(&cb->cond, &udp.cb.mutex, &ts);
+        } else {
+            ret = pthread_cond_wait(&cb->cond, &udp.cb.mutex);
+        }
     }
     pthread_mutex_unlock(&udp.cb.mutex);
+    if (ret == ETIMEDOUT) {
+        return -1;
+    }
     queue_hdr = (struct udp_queue_hdr *)entry->data;
     if (peer) {
         *peer = queue_hdr->addr;
@@ -247,8 +266,9 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
 ssize_t
 udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     struct udp_cb *cb, *tmp;
-    struct ip_interface *iface;
-    uint16_t p, sport;
+    struct netif *iface;
+    uint32_t p;
+    uint16_t sport;
 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
@@ -261,7 +281,7 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     }
     iface = cb->iface;
     if (!iface) {
-        iface = ip_get_interface_by_peer(peer);
+        iface = ip_netif_by_peer(peer);
         if (!iface) {
             pthread_mutex_unlock(&udp.cb.mutex);
             return -1;
@@ -270,12 +290,12 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     if (!cb->port) {
         for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
             UDP_CB_TABLE_FOREACH (tmp) {
-                if (tmp->port == hton16(p) && (!tmp->iface || tmp->iface == iface)) {
+                if (tmp->port == hton16((uint16_t)p) && (!tmp->iface || tmp->iface == iface)) {
                     break;
                 }
             }
             if (UDP_CB_TABLE_OFFSET(tmp) == UDP_CB_TABLE_SIZE) {
-                cb->port = hton16(p);
+                cb->port = hton16((uint16_t)p);
                 break;
             }
         }
@@ -286,7 +306,7 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     }
     sport = cb->port;
     pthread_mutex_unlock(&udp.cb.mutex);
-    return udp_output(iface, sport, buf, len, peer, port);
+    return udp_tx(iface, sport, buf, len, peer, port);
 }
 
 int
@@ -297,7 +317,7 @@ udp_init (void) {
         pthread_cond_init(&cb->cond, NULL);
     }
     pthread_mutex_init(&udp.cb.mutex, NULL);
-    if (ip_add_protocol(IP_PROTOCOL_UDP, udp_input) == -1) {
+    if (ip_add_protocol(IP_PROTOCOL_UDP, udp_rx) == -1) {
         return -1;
     }
     return 0;

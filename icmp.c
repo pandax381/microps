@@ -1,7 +1,10 @@
 #include <stdio.h>
-#include <signal.h>
-#include "icmp.h"
+#include <stddef.h>
+#include <stdint.h>
 #include "util.h"
+#include "net.h"
+#include "ip.h"
+#include "icmp.h"
 
 #define ICMP_TYPE_ECHO_REPLY 0
 #define ICMP_TYPE_DESTINATION_UNREACHABLE 3
@@ -21,20 +24,9 @@ struct icmp_echo {
 };
 
 static void
-icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface);
-
-int
-icmp_init (void) {
-    ip_add_protocol(IP_PROTOCOL_ICMP, icmp_recv);
-    return 0;
-}
-
-static void
-icmp_recv (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
+icmp_rx (uint8_t *packet, size_t plen, ip_addr_t *src, ip_addr_t *dst, struct netif *iface) {
     struct icmp_hdr *hdr;
 
-char buf[128];
-fprintf(stderr, "icmp_recv, src=%s\n", ip_addr_ntop(src, buf, sizeof(buf)));
     (void)dst;
     if (plen < sizeof(struct icmp_hdr)) {
         return;
@@ -44,6 +36,12 @@ fprintf(stderr, "icmp_recv, src=%s\n", ip_addr_ntop(src, buf, sizeof(buf)));
         hdr->type = ICMP_TYPE_ECHO_REPLY;
         hdr->sum = 0;
         hdr->sum = cksum16((uint16_t *)hdr, plen, 0);
-        ip_output(iface, IP_PROTOCOL_ICMP, packet, plen, src);
+        ip_tx(iface, IP_PROTOCOL_ICMP, packet, plen, src);
     }
+}
+
+int
+icmp_init (void) {
+    ip_add_protocol(IP_PROTOCOL_ICMP, icmp_rx);
+    return 0;
 }

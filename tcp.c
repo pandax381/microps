@@ -1,13 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <sys/time.h>
-#include "tcp.h"
-#include "ip.h"
 #include "util.h"
+#include "tcp.h"
 
 #define TCP_CB_TABLE_SIZE 128
 #define TCP_SOURCE_PORT_MIN 49152
@@ -62,7 +62,7 @@ struct tcp_txq_head {
 struct tcp_cb {
     uint8_t used;
     uint8_t state;
-    struct ip_interface *iface;
+    struct netif *iface;
     uint16_t port;
     struct {
         ip_addr_t addr;
@@ -140,7 +140,7 @@ tcp_txq_add (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
 }
 
 static ssize_t
-tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t *buf, size_t len) {
+tcp_tx (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t *buf, size_t len) {
     uint8_t segment[1500];
     struct tcp_hdr *hdr;
     ip_addr_t self, peer;
@@ -158,7 +158,7 @@ tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t 
     hdr->sum = 0;
     hdr->urg = 0;
     memcpy(hdr + 1, buf, len);
-    self = ip_interface_addr(cb->iface);
+    self = ((struct netif_ip *)cb->iface)->unicast;
     peer = cb->peer.addr;
     pseudo += (self >> 16) & 0xffff;
     pseudo += self & 0xffff;
@@ -167,7 +167,7 @@ tcp_output (struct tcp_cb *cb, uint32_t seq, uint32_t ack, uint8_t flg, uint8_t 
     pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
     pseudo += hton16(sizeof(struct tcp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct tcp_hdr) + len, pseudo);
-    ip_output(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
+    ip_tx(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)hdr, sizeof(struct tcp_hdr) + len, &peer);
     tcp_txq_add(cb, hdr, sizeof(struct tcp_hdr) + len);
     return len;
 }
@@ -191,7 +191,7 @@ tcp_timer_thread (void *arg) {
                 if (txq->segment->seq >= hton32(cb->snd.una)) {
                     if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
                         peer = cb->peer.addr;
-                        ip_output(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
+                        ip_tx(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
                         txq->timestamp = timestamp;
                     }
                 } else {
@@ -241,7 +241,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                     ack++;
                 }
             }
-            tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+            tcp_tx(cb, seq, ack, TCP_FLG_RST, NULL, 0);
             return;
         case TCP_CB_STATE_LISTEN:
             if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
@@ -250,7 +250,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
             if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
                 seq = ntoh32(hdr->ack);
                 ack = 0;
-                tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+                tcp_tx(cb, seq, ack, TCP_FLG_RST, NULL, 0);
                 return;
             }
             if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_SYN)) {
@@ -259,7 +259,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                 cb->iss = (uint32_t)random();
                 seq = cb->iss;
                 ack = cb->rcv.nxt;
-                tcp_output(cb, seq, ack, TCP_FLG_SYN | TCP_FLG_ACK, NULL, 0);
+                tcp_tx(cb, seq, ack, TCP_FLG_SYN | TCP_FLG_ACK, NULL, 0);
                 cb->snd.nxt = cb->iss + 1;
                 cb->snd.una = cb->iss;
                 cb->state = TCP_CB_STATE_SYN_RCVD;
@@ -271,7 +271,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                     if (!TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST)) {
                         seq = ntoh32(hdr->ack);
                         ack = 0;
-                        tcp_output(cb, seq, ack, TCP_FLG_RST, NULL, 0);
+                        tcp_tx(cb, seq, ack, TCP_FLG_RST, NULL, 0);
                     }
                     return;
                 }
@@ -292,32 +292,29 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                         cb->state = TCP_CB_STATE_ESTABLISHED;
                         seq = cb->snd.nxt;
                         ack = cb->rcv.nxt;
-                        tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+                        tcp_tx(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
                         pthread_cond_signal(&cb->cond);
                     }
                     return;
                 }
                 seq = cb->iss;
                 ack = cb->rcv.nxt;
-                tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+                tcp_tx(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
             }
             return;
         default:
             break;
     }
     if (ntoh32(hdr->seq) != cb->rcv.nxt) {
-        fprintf(stderr, "err 1, hdr->seq: %u, cb->rcv.nxt: %u\n", ntoh32(hdr->seq), cb->rcv.nxt);
-        // error
+        // TODO
         return;
     }
     if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_RST | TCP_FLG_SYN)) {
-        fprintf(stderr, "err 2\n");
-        // error
+        // TODO
         return;
     }
     if (!TCP_FLG_ISSET(hdr->flg, TCP_FLG_ACK)) {
-        fprintf(stderr, "err 3\n");
-        // error
+        // TODO
         return;
     }
     switch (cb->state) {
@@ -337,7 +334,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
             if (cb->snd.una < ntoh32(hdr->ack) && ntoh32(hdr->ack) <= cb->snd.nxt) {
                 cb->snd.una = ntoh32(hdr->ack);
             } else if (ntoh32(hdr->ack) > cb->snd.nxt) {
-                tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
+                tcp_tx(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
                 return;
             }
             // send window update
@@ -368,7 +365,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                 cb->rcv.wnd -= plen;
                 seq = cb->snd.nxt;
                 ack = cb->rcv.nxt;
-                tcp_output(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
+                tcp_tx(cb, seq, ack, TCP_FLG_ACK, NULL, 0);
                 pthread_cond_signal(&cb->cond);
                 break;
             default:
@@ -377,7 +374,7 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
     }
     if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_FIN)) {
         cb->rcv.nxt++;
-        tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
+        tcp_tx(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK, NULL, 0);
         switch (cb->state) {
             case TCP_CB_STATE_SYN_RCVD:
             case TCP_CB_STATE_ESTABLISHED:
@@ -400,12 +397,12 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
 }
 
 static void
-tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct ip_interface *iface) {
+tcp_rx (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *iface) {
     struct tcp_hdr *hdr;
     uint32_t pseudo = 0;
     struct tcp_cb *cb, *fcb = NULL, *lcb = NULL;
 
-    if (*dst != ip_interface_addr(iface)) {
+    if (*dst != ((struct netif_ip *)iface)->unicast) {
         return;
     }
     if (len < sizeof(struct tcp_hdr)) {
@@ -419,6 +416,7 @@ tcp_input (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct 
     pseudo += hton16((uint16_t)IP_PROTOCOL_TCP);
     pseudo += hton16(len);
     if (cksum16((uint16_t *)hdr, len, pseudo) != 0) {
+        fprintf(stderr, "tcp checksum error\n");
         return;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
@@ -490,13 +488,13 @@ tcp_api_close (int soc) {
     switch (cb->state) {
         case TCP_CB_STATE_SYN_RCVD:
         case TCP_CB_STATE_ESTABLISHED:
-            tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
+            tcp_tx(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
             cb->state = TCP_CB_STATE_FIN_WAIT1;
             cb->snd.nxt++;
             pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
             break;
         case TCP_CB_STATE_CLOSE_WAIT:
-            tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
+            tcp_tx(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_FIN | TCP_FLG_ACK, NULL, 0);
             cb->state = TCP_CB_STATE_LAST_ACK;
             cb->snd.nxt++;
             pthread_cond_wait(&cb->cond, &tcp.cb.mutex);
@@ -514,7 +512,7 @@ tcp_api_close (int soc) {
 int
 tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
     struct tcp_cb *cb, *tmp;
-    uint16_t p;
+    uint32_t p;
 
     if (TCP_SOCKET_ISINVALID(soc)) {
         return -1;
@@ -529,12 +527,12 @@ tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
         int offset = time(NULL) % 1024;
         for (p = TCP_SOURCE_PORT_MIN + offset; p <= TCP_SOURCE_PORT_MAX; p++) {
             TCP_CB_TABLE_FOREACH (tmp) {
-                if (tmp->used && tmp->port == hton16(p)) {
+                if (tmp->used && tmp->port == hton16((uint16_t)p)) {
                     break;
                 }
             }
             if (TCP_CB_TABLE_OFFSET(tmp) == TCP_CB_TABLE_SIZE) {
-                cb->port = hton16(p);
+                cb->port = hton16((uint16_t)p);
                 break;
             }
         }
@@ -547,7 +545,7 @@ tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
     cb->peer.port = port;
     cb->rcv.wnd = sizeof(cb->window);
     cb->iss = (uint32_t)random();
-    tcp_output(cb, cb->iss, 0, TCP_FLG_SYN, NULL, 0);
+    tcp_tx(cb, cb->iss, 0, TCP_FLG_SYN, NULL, 0);
     cb->snd.nxt = cb->iss + 1;
     cb->state = TCP_CB_STATE_SYN_SENT;
     while (cb->state == TCP_CB_STATE_SYN_SENT) {
@@ -672,7 +670,7 @@ tcp_api_send (int soc, uint8_t *buf, size_t len) {
         pthread_mutex_unlock(&tcp.cb.mutex);
         return -1;
     }
-    tcp_output(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK | TCP_FLG_PSH, buf, len);
+    tcp_tx(cb, cb->snd.nxt, cb->rcv.nxt, TCP_FLG_ACK | TCP_FLG_PSH, buf, len);
     cb->snd.nxt += len;
     pthread_mutex_unlock(&tcp.cb.mutex);
     return 0;
@@ -686,7 +684,7 @@ tcp_init (void) {
         pthread_cond_init(&cb->cond, NULL);
     }
     pthread_mutex_init(&tcp.cb.mutex, NULL);
-    if (ip_add_protocol(IP_PROTOCOL_TCP, tcp_input) == -1) {
+    if (ip_add_protocol(IP_PROTOCOL_TCP, tcp_rx) == -1) {
         return -1;
     }
     if (pthread_create(&tcp.thread, NULL, tcp_timer_thread, NULL) == -1) {

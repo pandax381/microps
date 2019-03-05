@@ -1,10 +1,5 @@
-#ifndef _ICMP_H_
-#define _ICMP_H_
-
-#include <stdint.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include "ip.h"
+#ifndef ICMP_H
+#define ICMP_H
 
 extern int
 icmp_init (void);

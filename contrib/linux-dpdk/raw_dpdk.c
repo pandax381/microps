@@ -1,10 +1,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "dpdk.h"
-#include "microps.h"
+#include <inttypes.h>
+#include <rte_eal.h>
+#include <rte_ethdev.h>
+#include <rte_cycles.h>
+#include <rte_lcore.h>
+#include <rte_mbuf.h>
+#include <rte_hexdump.h>
+#include <rte_ether.h>
+#include "raw.h"
 
-struct device {
+#define BURST_SIZE 32
+#define RX_RING_SIZE 128
+#define TX_RING_SIZE 512
+#define NUM_MBUFS 8191
+#define MBUF_CACHE_SIZE 250
+#define BURST_SIZE 32
+
+struct raw_device {
     uint16_t port;
 };
 
@@ -13,7 +27,6 @@ struct rte_mempool *mbuf_pool;
 static const struct rte_eth_conf port_conf_default = {
     .rxmode = { .max_rx_pkt_len = ETHER_MAX_LEN }
 };
-
 
 /*
  * Initializes a given port using global settings and with the RX buffers
@@ -109,35 +122,35 @@ dpdk_init (void) {
 
 
 /* Wrapped a function to control device but not practically meaningful. It is expected that name will be assigned port number. */
-device_t *
-device_open (const char *name) {
-    device_t *device;
-    if ((device = malloc(sizeof(*device))) == NULL) {
-        perror("malloc");
+struct raw_device *
+raw_open (const char *name) {
+    struct raw_device *dev;
+
+    dev = malloc(sizeof(struct raw_device));
+    if (!dev) {
+        fprintf(stderr, "malloc: failure\n");
         return NULL;
     }
-    device->port = (uint16_t)atoi(name);
-
-    if (port_init(device->port) < 0){
-        free(device);
+    dev->port = (uint16_t)atoi(name);
+    if (port_init(dev->port) < 0){
+        free(dev);
         return NULL;
     }
-
-    return device;
+    return dev;
 }
 
 void 
-device_close (device_t *device) {
-    printf("close port %u\n", device->port);
-    rte_eth_dev_stop(device->port);
-    rte_eth_dev_close(device->port);
-    free(device);
+raw_close (struct raw_device *dev) {
+    printf("close port %u\n", dev->port);
+    rte_eth_dev_stop(dev->port);
+    rte_eth_dev_close(dev->port);
+    free(dev);
 }
 
 void
-device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+raw_rx (struct raw_device *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
     uint16_t nb_ports;
-    uint16_t port = device->port;
+    uint16_t port = dev->port;
     struct rte_mbuf *bufs[BURST_SIZE];
     uint16_t nb_rx;
     nb_ports = rte_eth_dev_count();
@@ -154,11 +167,12 @@ device_input (device_t *device, void (*callback)(uint8_t *, size_t, void *), voi
 }
 
 ssize_t
-device_output (device_t *device, const uint8_t *buffer, size_t length) {
+raw_tx (struct raw_device *dev, const uint8_t *buffer, size_t length) {
     struct rte_mbuf *bufs[BURST_SIZE];
     uint16_t nb_ports;
-    uint16_t port = device->port;
+    uint16_t port = dev->port;
     uint8_t *p;
+
     nb_ports = rte_eth_dev_count();
 
     /* Send burst of TX packets */
@@ -175,4 +189,11 @@ device_output (device_t *device, const uint8_t *buffer, size_t length) {
         return length;
     }
     return -1;
+}
+
+int
+raw_addr (const char *name, uint8_t *dst, size_t size) {
+    struct ether_addr addr;
+
+    rte_eth_macaddr_get(port, &addr);
 }
