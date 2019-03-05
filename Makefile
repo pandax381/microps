@@ -35,7 +35,7 @@ endif
 
 .PHONY: all clean all_test
 
-all: $(PROGRAMS)
+all: $(PROGRAMS) all_test
 
 $(PROGRAMS): % : %.o $(OBJECTS) $(RAW)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
