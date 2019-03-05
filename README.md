@@ -3,62 +3,70 @@ microps
 
 Micro TCP/IP Protocol Stack
 
-## build
+## Build
+
+Build sample applications and test programs
 
 ```
- $ make
-```
+$ make
+``` 
 
-## usage
-
-***Note: Currently the address information is written directly in the source code***
-
-example (echo_server):
+with debug output
 
 ```
- $ sudo ./echo_server
+$ CFLAGS=-DDEBUG make
 ```
 
-arp test:
+## Sample applications
+
+TCP Echo server (with dynamic address)
 
 ```
- $ sudo arping 192.168.0.100
+ $ sudo apps/tcp_echo eth0 00:00:de:ad:be:ef dhcp
 ```
 
-ping test:
+UDP Echo server (with static address)
 
 ```
- $ ping 192.168.0.100
+ $ sudo apps/tcp_echo eth0 static 172.16.100.2 255.255.255.0 172.16.100.1
 ```
 
-echo test:
+Both application listen on port 7.
+ 
+## Test programs
 
+test/raw_test
 ```
- $ nc -u 192.168.0.100 7
-```
-
-## microps DPDK effective version
-
-### preparation
-
-build DPDK and setup your machine to use DPDK. (please see http://dpdk.org/)
-
-### build
-
-```
- $ USE_DPDK=1 make
+$ sudo test/raw_test eth0
 ```
 
-### usage
-
-example (echo_server):  
-
+test/ethernet_test
 ```
-$ sudo ./build/echo_server
+$ sudo test/ethernet_test eth0
 ```
 
-ping test:  
+test/slip_test
+```
+$ sudo test/slip_test /dev/ttyXXX
+```
 
+test/arp_test
 ```
-$ ping 10.0.0.1
+$ sudo test/arp_test eth0 00:00:de:ad:be:ef 172.16.100.2
 ```
+
+## RAW devices
+
+You can select a Link-Level RAW device.
+
++ raw_socket
++ raw_tap
++ raw_bpf
+
+It can change with the `$RAW` variable in the Makefile.
+
+The default value: Linux is raw_socket and BSD is raw_bpf.
+
+## License
+
+microps is under the MIT License: See [LICENSE](./LICENSE) file.
