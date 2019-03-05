@@ -1,5 +1,19 @@
+# Applications
+apps/tcp_echo
+apps/udp_echo
+
+# Test programs
+test/raw_test
+test/ethernet_test
+test/slip_test
+test/arp_test
+
 # Object files
 *.o
+*.ko
+*.obj
+*.elf
+*.dSYM
 
 # Libraries
 *.lib
@@ -15,6 +29,9 @@
 *.exe
 *.out
 *.app
+*.i*86
+*.x86_64
+*.hex
 
-echo_server
-build
+# Other files
+*.swp
