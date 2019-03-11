@@ -38,9 +38,12 @@ struct ip_protocol {
     void (*handler)(uint8_t *payload, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *netif);
 };
 
+static int ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, const ip_addr_t *dst);
+
 static struct ip_route route_table[IP_ROUTE_TABLE_SIZE];
 static struct ip_protocol *protocols;
 static struct ip_fragment *fragments;
+static int ip_is_forwarding = 1;
 
 const ip_addr_t IP_ADDR_ANY       = 0x00000000;
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff;
@@ -385,6 +388,31 @@ ip_netif_by_peer (ip_addr_t *peer) {
 }
 
 /*
+ * IP FORWARDING
+ */
+
+static int
+ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
+    struct ip_hdr *hdr;
+    struct ip_route *dst_route;
+
+    hdr = (struct ip_hdr *)dgram;
+    if(hdr->ttl) {
+        hdr->ttl--;
+    }
+    if(!hdr->ttl) {
+        fprintf(stderr, "time exceeded.\n");
+        return -1;
+    }
+    dst_route = ip_route_lookup(NULL, &hdr->dst);
+    if(!dst_route) {
+        fprintf(stderr, "ip no route to host.\n");
+        return -1;
+    }
+    return ip_tx_netdev(dst_route->netif, dgram, dlen, &dst_route->nexthop);
+}
+
+/*
  * IP CORE
  */
 
@@ -423,6 +451,9 @@ ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev) {
     if (hdr->dst != iface->unicast) {
         if (hdr->dst != iface->broadcast && hdr->dst != IP_ADDR_BROADCAST) {
             /* for other host */
+            if (ip_is_forwarding) {
+                ip_forward_process(dgram, dlen, iface);
+            }
             return;
         }
     }
