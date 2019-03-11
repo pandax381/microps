@@ -1,4 +1,4 @@
-PROGRAMS = apps/tcp_echo apps/udp_echo
+PROGRAMS = apps/tcp_echo apps/udp_echo apps/router
 
 TEST_DIR = test
 
@@ -22,7 +22,8 @@ OBJECTS = util.o \
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
-	RAW = raw_socket.o
+	# RAW = raw_socket.o
+	RAW = raw_tap.o
 	CFLAGS := $(CFLAGS) -lpthread -pthread
 endif
 
