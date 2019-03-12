@@ -395,6 +395,7 @@ static int
 ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     struct ip_hdr *hdr;
     struct ip_route *dst_route;
+    ip_addr_t *nexthop;
 
     hdr = (struct ip_hdr *)dgram;
     if(hdr->ttl) {
@@ -409,7 +410,9 @@ ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
         fprintf(stderr, "ip no route to host.\n");
         return -1;
     }
-    return ip_tx_netdev(dst_route->netif, dgram, dlen, &dst_route->nexthop);
+    nexthop = dst_route->nexthop ? &dst_route->nexthop : &hdr->dst;
+    hdr->sum = cksum16((uint16_t *)hdr, (hdr->vhl & 0x0f) << 2, -hdr->sum);
+    return ip_tx_netdev(dst_route->netif, dgram, dlen, nexthop);
 }
 
 /*
