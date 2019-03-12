@@ -270,6 +270,13 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
                 ret = pthread_cond_timedwait(&entry->cond, &mutex, &timeout);
             } while (ret == EINTR);
             if (!entry->used || ret == ETIMEDOUT) {
+                entry->used = 0;
+                entry->pa = 0;
+                memset(&entry->ha, 0, sizeof(ethernet_addr_t));
+                entry->timestamp = 0;
+                free(entry->data);
+                entry->data = NULL;
+                entry->len = 0;
                 pthread_mutex_unlock(&mutex);
                 return ARP_RESOLVE_ERROR;
             }
