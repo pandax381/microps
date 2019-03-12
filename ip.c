@@ -394,10 +394,12 @@ ip_netif_by_peer (ip_addr_t *peer) {
 static int
 ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     struct ip_hdr *hdr;
+    size_t ip_hlen;
     struct ip_route *dst_route;
     ip_addr_t *nexthop;
 
     hdr = (struct ip_hdr *)dgram;
+    ip_hlen = (hdr->vhl & 0x0f) << 2;
     if(hdr->ttl) {
         hdr->ttl--;
     }
@@ -408,6 +410,31 @@ ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     dst_route = ip_route_lookup(NULL, &hdr->dst);
     if(!dst_route) {
         fprintf(stderr, "ip no route to host.\n");
+
+        // ICMP error msg
+        struct icmp_hdr {
+            uint8_t type;
+            uint8_t code;
+            uint16_t sum;
+            uint32_t unused;
+            uint8_t data[0];
+        };
+
+        struct icmp_hdr *icmp_hdr;
+        size_t icmp_hlen = sizeof(struct icmp_hdr);
+        size_t icmp_dlen = ip_hlen + 8;
+        uint8_t packet[icmp_hlen + icmp_dlen];
+        icmp_hdr = (struct icmp_hdr *)packet;
+        icmp_hdr->type = 3;
+        icmp_hdr->code = 0;
+        icmp_hdr->sum = 0;
+        icmp_hdr->unused = 0;
+        memcpy(icmp_hdr->data, dgram, icmp_dlen);
+        icmp_hdr->sum = cksum16((uint16_t *)icmp_hdr, icmp_hlen + icmp_dlen, 0);
+
+        ip_tx((struct netif *)iface, IP_PROTOCOL_ICMP, packet, icmp_hlen + icmp_dlen, &hdr->src);
+        // End
+
         return -1;
     }
     nexthop = dst_route->nexthop ? &dst_route->nexthop : &hdr->dst;
