@@ -44,7 +44,7 @@ static int ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, cons
 static struct ip_route route_table[IP_ROUTE_TABLE_SIZE];
 static struct ip_protocol *protocols;
 static struct ip_fragment *fragments;
-static int ip_is_forwarding = 1;
+static int ip_is_forwarding;
 
 const ip_addr_t IP_ADDR_ANY       = 0x00000000;
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff;
@@ -391,6 +391,12 @@ ip_netif_by_peer (ip_addr_t *peer) {
 /*
  * IP FORWARDING
  */
+
+int
+ip_enable_forwarding (void) {
+    ip_is_forwarding = 1;
+    return 0;
+}
 
 static int
 ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {

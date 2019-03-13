@@ -38,6 +38,7 @@ init(void) {
     fprintf(stderr, "microps_init(): error\n");
     return -1;
   }
+  ip_enable_forwarding();
   for(interface = interfaces; interface < array_tailof(interfaces); interface++) {
     struct netdev *dev;
     dev = netdev_alloc(NETDEV_TYPE_ETHERNET);
