@@ -129,6 +129,7 @@ arp_table_insert (const ip_addr_t *pa, const ethernet_addr_t *ha) {
     if (!entry) {
         return -1;
     }
+    entry->used = 1;
     entry->pa = *pa;
     memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
     time(&entry->timestamp);
