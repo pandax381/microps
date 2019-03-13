@@ -302,7 +302,7 @@ ip_netif_alloc (const char *addr, const char *netmask, const char *gateway) {
         return NULL;
     }
     if (gateway) {
-        if (ip_addr_pton(netmask, &gw) == -1) {
+        if (ip_addr_pton(gateway, &gw) == -1) {
             free(iface);
             return NULL;
         }
