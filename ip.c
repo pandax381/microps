@@ -404,6 +404,7 @@ ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     }
     if(!hdr->ttl) {
         fprintf(stderr, "time exceeded.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, dgram, dlen);
         return -1;
     }
     dst_route = ip_route_lookup(NULL, &hdr->dst);
