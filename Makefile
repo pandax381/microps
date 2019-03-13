@@ -50,7 +50,7 @@ ethernet_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o
 slip_test: % : util.o $(TEST_DIR)/%.o net.o slip.o
 	$(CC) $(CFLAGS) -o $(TEST_DIR)/$@ $^ $(LDFLAGS)
 
-arp_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o arp.o ip.o
+arp_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o arp.o ip.o icmp.o
 	$(CC) $(CFLAGS) -o $(TEST_DIR)/$@ $^ $(LDFLAGS)
 
 all_test: raw_test ethernet_test slip_test arp_test
