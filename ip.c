@@ -397,6 +397,7 @@ ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     struct ip_hdr *hdr;
     struct ip_route *dst_route;
     ip_addr_t *nexthop;
+    int ret;
 
     hdr = (struct ip_hdr *)dgram;
     if(hdr->ttl) {
@@ -415,7 +416,13 @@ ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     }
     nexthop = dst_route->nexthop ? &dst_route->nexthop : &hdr->dst;
     hdr->sum = cksum16((uint16_t *)hdr, (hdr->vhl & 0x0f) << 2, -hdr->sum);
-    return ip_tx_netdev(dst_route->netif, dgram, dlen, nexthop);
+    ret = ip_tx_netdev(dst_route->netif, dgram, dlen, nexthop);
+    if(ret == -1) {
+        fprintf(stderr, "host unreachable.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_HOST, dgram, dlen);
+        return ret;
+    }
+    return ret;
 }
 
 /*
