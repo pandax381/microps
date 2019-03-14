@@ -44,44 +44,7 @@ static int ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, cons
 static struct ip_route route_table[IP_ROUTE_TABLE_SIZE];
 static struct ip_protocol *protocols;
 static struct ip_fragment *fragments;
-static int ip_is_forwarding;
-
-const ip_addr_t IP_ADDR_ANY       = 0x00000000;
-const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff;
-
-int
-ip_addr_pton (const char *p, ip_addr_t *n) {
-    char *sp, *ep;
-    int idx;
-    long ret;
-
-    sp = (char *)p;
-    for (idx = 0; idx < 4; idx++) {
-        ret = strtol(sp, &ep, 10);
-        if (ret < 0 || ret > 255) {
-            return -1;
-        }
-        if (ep == sp) {
-            return -1;
-        }
-        if ((idx == 3 && *ep != '\0') || (idx != 3 && *ep != '.')) {
-            return -1;
-        }
-        ((uint8_t *)n)[idx] = ret;
-        sp = ep + 1;
-    }
-    return 0;
-}
-
-char *
-ip_addr_ntop (const ip_addr_t *n, char *p, size_t size) {
-    uint8_t *ptr;
-
-    ptr = (uint8_t *)n;
-    snprintf(p, size, "%d.%d.%d.%d",
-        ptr[0], ptr[1], ptr[2], ptr[3]);
-    return p;
-}
+static int ip_forwarding;
 
 void
 ip_dump (struct netif *netif, uint8_t *packet, size_t plen) {
@@ -393,9 +356,8 @@ ip_netif_by_peer (ip_addr_t *peer) {
  */
 
 int
-ip_enable_forwarding (void) {
-    ip_is_forwarding = 1;
-    return 0;
+ip_set_forwarding (int mode) {
+    return (ip_forwarding = mode);
 }
 
 static int
@@ -475,7 +437,7 @@ ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev) {
     if (hdr->dst != iface->unicast) {
         if (hdr->dst != iface->broadcast && hdr->dst != IP_ADDR_BROADCAST) {
             /* for other host */
-            if (ip_is_forwarding) {
+            if (ip_forwarding) {
                 ip_forward_process(dgram, dlen, iface);
             }
             return;

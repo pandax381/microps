@@ -38,7 +38,10 @@ init(void) {
         fprintf(stderr, "microps_init(): error\n");
         return -1;
     }
-    ip_enable_forwarding();
+    if (!ip_set_forwarding(1)) {
+        fprintf(stderr, "ip_set_forwarding(): error\n");
+        return -1;
+    }
     for(interface = interfaces; interface < array_tailof(interfaces); interface++) {
         struct netdev *dev;
         dev = netdev_alloc(NETDEV_TYPE_ETHERNET);

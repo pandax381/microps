@@ -64,10 +64,8 @@ extern struct netif *
 ip_netif_by_addr (ip_addr_t *addr);
 extern struct netif *
 ip_netif_by_peer (ip_addr_t *peer);
-
 extern int
-ip_enable_forwarding (void);
-
+ip_set_forwarding (int mode);
 extern ssize_t
 ip_tx (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *addr);
 extern int
