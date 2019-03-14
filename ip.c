@@ -7,6 +7,7 @@
 #include "util.h"
 #include "arp.h"
 #include "ip.h"
+#include "icmp.h"
 
 #define IP_FRAGMENT_TIMEOUT_SEC 30
 #define IP_FRAGMENT_NUM_MAX 8
@@ -38,9 +39,12 @@ struct ip_protocol {
     void (*handler)(uint8_t *payload, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *netif);
 };
 
+static int ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, const ip_addr_t *dst);
+
 static struct ip_route route_table[IP_ROUTE_TABLE_SIZE];
 static struct ip_protocol *protocols;
 static struct ip_fragment *fragments;
+static int ip_is_forwarding;
 
 const ip_addr_t IP_ADDR_ANY       = 0x00000000;
 const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff;
@@ -385,6 +389,54 @@ ip_netif_by_peer (ip_addr_t *peer) {
 }
 
 /*
+ * IP FORWARDING
+ */
+
+int
+ip_enable_forwarding (void) {
+    ip_is_forwarding = 1;
+    return 0;
+}
+
+static int
+ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
+    struct ip_hdr *hdr;
+    struct ip_route *dst_route;
+    ip_addr_t *nexthop;
+    int ret;
+
+    hdr = (struct ip_hdr *)dgram;
+    if (hdr->ttl) {
+        hdr->ttl--;
+    }
+    if (!hdr->ttl) {
+        fprintf(stderr, "time exceeded.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, dgram, dlen);
+        return -1;
+    }
+    dst_route = ip_route_lookup(NULL, &hdr->dst);
+    if (!dst_route) {
+        fprintf(stderr, "ip no route to host.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NET, dgram, dlen);
+        return -1;
+    }
+    if ((ntoh16(hdr->offset) & 0x4000) && (ntoh16(hdr->len) > dst_route->netif->dev->mtu)) {
+        fprintf(stderr, "fragmentation needed and DF set.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NEEDFRAG, dgram, dlen);
+        return -1;
+    }
+    nexthop = dst_route->nexthop ? &dst_route->nexthop : &hdr->dst;
+    hdr->sum = cksum16((uint16_t *)hdr, (hdr->vhl & 0x0f) << 2, -hdr->sum);
+    ret = ip_tx_netdev(dst_route->netif, dgram, dlen, nexthop);
+    if (ret == -1) {
+        fprintf(stderr, "host unreachable.\n");
+        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_HOST, dgram, dlen);
+        return ret;
+    }
+    return ret;
+}
+
+/*
  * IP CORE
  */
 
@@ -423,6 +475,9 @@ ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev) {
     if (hdr->dst != iface->unicast) {
         if (hdr->dst != iface->broadcast && hdr->dst != IP_ADDR_BROADCAST) {
             /* for other host */
+            if (ip_is_forwarding) {
+                ip_forward_process(dgram, dlen, iface);
+            }
             return;
         }
     }

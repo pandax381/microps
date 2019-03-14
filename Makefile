@@ -1,4 +1,4 @@
-PROGRAMS = apps/tcp_echo apps/udp_echo
+PROGRAMS = apps/tcp_echo apps/udp_echo apps/router
 
 TEST_DIR = test
 
@@ -22,7 +22,8 @@ OBJECTS = util.o \
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
-	RAW = raw_socket.o
+	# RAW = raw_socket.o
+	RAW = raw_tap.o
 	CFLAGS := $(CFLAGS) -lpthread -pthread
 endif
 
@@ -49,7 +50,7 @@ ethernet_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o
 slip_test: % : util.o $(TEST_DIR)/%.o net.o slip.o
 	$(CC) $(CFLAGS) -o $(TEST_DIR)/$@ $^ $(LDFLAGS)
 
-arp_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o arp.o ip.o
+arp_test: % : util.o $(TEST_DIR)/%.o $(RAW) net.o ethernet.o arp.o ip.o icmp.o
 	$(CC) $(CFLAGS) -o $(TEST_DIR)/$@ $^ $(LDFLAGS)
 
 all_test: raw_test ethernet_test slip_test arp_test

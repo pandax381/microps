@@ -1,6 +1,7 @@
 # Applications
 apps/tcp_echo
 apps/udp_echo
+apps/router
 
 # Test programs
 test/raw_test
