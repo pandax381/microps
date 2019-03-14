@@ -43,6 +43,7 @@ struct arp_entry {
     pthread_cond_t cond;
     void *data;
     size_t len;
+    struct netif *netif;
 };
 
 static struct arp_entry arp_table[ARP_TABLE_SIZE];
@@ -100,6 +101,10 @@ arp_table_update (struct netdev *dev, const ip_addr_t *pa, const ethernet_addr_t
     memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
     time(&entry->timestamp);
     if (entry->data) {
+        if (entry->netif->dev != dev) {
+            /* warning: receive response from unintended device */
+            dev = entry->netif->dev;
+        }
         dev->ops->tx(dev, ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, &entry->ha);
         free(entry->data);
         entry->data = NULL;
@@ -138,15 +143,28 @@ arp_table_insert (const ip_addr_t *pa, const ethernet_addr_t *ha) {
 }
 
 static void
+arp_entry_clear (struct arp_entry *entry) {
+    entry->used = 0;
+    entry->pa = 0;
+    memset(&entry->ha, 0, sizeof(ethernet_addr_t));
+    entry->timestamp = 0;
+    if (entry->data) {
+        /* TODO: send ICMP Host Unreachable */
+        free(entry->data);
+        entry->data = NULL;
+        entry->len = 0;
+        entry->netif = NULL;
+    }
+    /* Don't touch entry->cond */
+}
+
+static void
 arp_table_patrol (void) {
     struct arp_entry *entry;
 
     for (entry = arp_table; entry < array_tailof(arp_table); entry++) {
         if (entry->used && timestamp - entry->timestamp > ARP_TABLE_TIMEOUT_SEC) {
-            entry->used = 0;
-            entry->pa = 0;
-            memset(&entry->ha, 0, sizeof(ethernet_addr_t));
-            entry->timestamp = 0;
+            arp_entry_clear(entry);
             pthread_cond_broadcast(&entry->cond);
         }
     }
@@ -271,13 +289,10 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
                 ret = pthread_cond_timedwait(&entry->cond, &mutex, &timeout);
             } while (ret == EINTR);
             if (!entry->used || ret == ETIMEDOUT) {
-                entry->used = 0;
-                entry->pa = 0;
-                memset(&entry->ha, 0, sizeof(ethernet_addr_t));
-                entry->timestamp = 0;
-                free(entry->data);
-                entry->data = NULL;
-                entry->len = 0;
+                if (entry->used) {
+                    arp_entry_clear(entry);
+                }
+                /* TODO: send ICMP Host Unreachable */
                 pthread_mutex_unlock(&mutex);
                 return ARP_RESOLVE_ERROR;
             }
@@ -305,6 +320,7 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
     entry->used = 1;
     entry->pa = *pa;
     time(&entry->timestamp);
+    entry->netif = netif;
     arp_send_request(netif, pa);
     pthread_mutex_unlock(&mutex);
     return ARP_RESOLVE_QUERY;
