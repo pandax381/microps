@@ -12,7 +12,6 @@ OBJS = util.o \
        ethernet.o \
        slip.o \
        arp.o \
-       ip_addr.o \
        ip.o \
        icmp.o \
        udp.o \
