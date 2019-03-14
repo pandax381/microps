@@ -398,39 +398,34 @@ ip_set_forwarding (int mode) {
 }
 
 static int
-ip_forward_process(uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
+ip_forward_process (uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     struct ip_hdr *hdr;
-    struct ip_route *dst_route;
-    ip_addr_t *nexthop;
+    struct ip_route *route;
+    uint16_t sum;
     int ret;
 
     hdr = (struct ip_hdr *)dgram;
-    if (hdr->ttl) {
-        hdr->ttl--;
-    }
-    if (!hdr->ttl) {
-        fprintf(stderr, "time exceeded.\n");
+    if (!(hdr->ttl - 1)) {
         icmp_error_tx((struct netif *)iface, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, dgram, dlen);
         return -1;
     }
-    dst_route = ip_route_lookup(NULL, &hdr->dst);
-    if (!dst_route) {
-        fprintf(stderr, "ip no route to host.\n");
+    route = ip_route_lookup(NULL, &hdr->dst);
+    if (!route) {
         icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NET, dgram, dlen);
         return -1;
     }
-    if ((ntoh16(hdr->offset) & 0x4000) && (ntoh16(hdr->len) > dst_route->netif->dev->mtu)) {
-        fprintf(stderr, "fragmentation needed and DF set.\n");
+    if ((ntoh16(hdr->offset) & 0x4000) && (ntoh16(hdr->len) > route->netif->dev->mtu)) {
         icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NEEDFRAG, dgram, dlen);
         return -1;
     }
-    nexthop = dst_route->nexthop ? &dst_route->nexthop : &hdr->dst;
+    hdr->ttl--;
+    sum = hdr->sum;
     hdr->sum = cksum16((uint16_t *)hdr, (hdr->vhl & 0x0f) << 2, -hdr->sum);
-    ret = ip_tx_netdev(dst_route->netif, dgram, dlen, nexthop);
+    ret = ip_tx_netdev(route->netif, dgram, dlen, route->nexthop ? &route->nexthop : &hdr->dst);
     if (ret == -1) {
-        fprintf(stderr, "host unreachable.\n");
+        hdr->ttl++;
+        hdr->sum = sum;
         icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_HOST, dgram, dlen);
-        return ret;
     }
     return ret;
 }
@@ -464,6 +459,10 @@ ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev) {
     }
     if (cksum16((uint16_t *)hdr, hlen, 0) != 0) {
         fprintf(stderr, "ip checksum error.\n");
+        return;
+    }
+    if (!hdr->ttl) {
+        fprintf(stderr, "ip packet was dead (TTL=0).\n");
         return;
     }
     iface = (struct netif_ip *)netdev_get_netif(dev, NETIF_FAMILY_IPV4);
