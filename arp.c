@@ -149,13 +149,13 @@ arp_entry_clear (struct arp_entry *entry) {
     memset(&entry->ha, 0, sizeof(ethernet_addr_t));
     entry->timestamp = 0;
     if (entry->data) {
-        /* TODO: send ICMP Host Unreachable */
+        /* TODO: Unreachable */
         free(entry->data);
         entry->data = NULL;
         entry->len = 0;
         entry->netif = NULL;
     }
-    /* Don't touch entry->cond */
+    /* !!! Don't touch entry->cond !!! */
 }
 
 static void
@@ -280,11 +280,12 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
 
     pthread_mutex_lock(&mutex);
     gettimeofday(&now, NULL);
-    timeout.tv_sec = now.tv_sec + 5;
+    timeout.tv_sec = now.tv_sec + 1;
     timeout.tv_nsec = now.tv_usec * 1000;
     entry = arp_table_select(pa);
     if (entry) {
         if (memcmp(&entry->ha, &ETHERNET_ADDR_ANY, sizeof(ethernet_addr_t)) == 0) {
+            arp_send_request(netif, pa); /* just in case packet loss */
             do {
                 ret = pthread_cond_timedwait(&entry->cond, &mutex, &timeout);
             } while (ret == EINTR);
@@ -292,7 +293,7 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
                 if (entry->used) {
                     arp_entry_clear(entry);
                 }
-                /* TODO: send ICMP Host Unreachable */
+                /* TODO: Unreachable */
                 pthread_mutex_unlock(&mutex);
                 return ARP_RESOLVE_ERROR;
             }
