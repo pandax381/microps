@@ -39,7 +39,10 @@ struct ip_protocol {
     void (*handler)(uint8_t *payload, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *netif);
 };
 
-static int ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, const ip_addr_t *dst);
+static void
+ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev);
+static int
+ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, const ip_addr_t *dst);
 
 static struct ip_route route_table[IP_ROUTE_TABLE_SIZE];
 static struct ip_protocol *protocols;
@@ -398,7 +401,7 @@ ip_set_forwarding (int mode) {
 }
 
 static int
-ip_forward_process (uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
+ip_forward_process (uint8_t *dgram, size_t dlen, struct netif *netif) {
     struct ip_hdr *hdr;
     struct ip_route *route;
     uint16_t sum;
@@ -406,16 +409,21 @@ ip_forward_process (uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
 
     hdr = (struct ip_hdr *)dgram;
     if (!(hdr->ttl - 1)) {
-        icmp_error_tx((struct netif *)iface, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, dgram, dlen);
+        icmp_error_tx(netif, ICMP_TYPE_TIME_EXCEEDED, ICMP_CODE_EXCEEDED_TTL, dgram, dlen);
         return -1;
     }
     route = ip_route_lookup(NULL, &hdr->dst);
     if (!route) {
-        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NET, dgram, dlen);
+        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_NET_UNREACH, dgram, dlen);
         return -1;
     }
+    if (((struct netif_ip *)route->netif)->unicast == hdr->dst) {
+        /* loopback */
+        ip_rx(dgram, dlen, route->netif->dev);
+        return 0;
+    }
     if ((ntoh16(hdr->offset) & 0x4000) && (ntoh16(hdr->len) > route->netif->dev->mtu)) {
-        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_NEEDFRAG, dgram, dlen);
+        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_FRAGMENT_NEEDED, dgram, dlen);
         return -1;
     }
     hdr->ttl--;
@@ -423,9 +431,8 @@ ip_forward_process (uint8_t *dgram, size_t dlen, struct netif_ip *iface) {
     hdr->sum = cksum16((uint16_t *)hdr, (hdr->vhl & 0x0f) << 2, -hdr->sum);
     ret = ip_tx_netdev(route->netif, dgram, dlen, route->nexthop ? &route->nexthop : &hdr->dst);
     if (ret == -1) {
-        hdr->ttl++;
-        hdr->sum = sum;
-        icmp_error_tx((struct netif *)iface, ICMP_UNREACH, ICMP_UNREACH_HOST, dgram, dlen);
+        hdr->ttl++; hdr->sum = sum; /* Restore original IP Header */
+        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, route->nexthop ? ICMP_CODE_NET_UNREACH : ICMP_CODE_HOST_UNREACH, dgram, dlen);
     }
     return ret;
 }
@@ -474,7 +481,7 @@ ip_rx (uint8_t *dgram, size_t dlen, struct netdev *dev) {
         if (hdr->dst != iface->broadcast && hdr->dst != IP_ADDR_BROADCAST) {
             /* for other host */
             if (ip_forwarding) {
-                ip_forward_process(dgram, dlen, iface);
+                ip_forward_process(dgram, dlen, (struct netif *)iface);
             }
             return;
         }
@@ -527,7 +534,7 @@ ip_tx_netdev (struct netif *netif, uint8_t *packet, size_t plen, const ip_addr_t
 }
 
 static int
-ip_tx_core (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst, const ip_addr_t *nexthop, uint16_t id, uint16_t offset) {
+ip_tx_core (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *src, const ip_addr_t *dst, const ip_addr_t *nexthop, uint16_t id, uint16_t offset) {
     uint8_t packet[4096];
     struct ip_hdr *hdr;
     uint16_t hlen;
@@ -542,7 +549,7 @@ ip_tx_core (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t le
     hdr->ttl = 0xff;
     hdr->protocol = protocol;
     hdr->sum = 0;
-    hdr->src = ((struct netif_ip *)netif)->unicast;
+    hdr->src = src ? *src : ((struct netif_ip *)netif)->unicast;
     hdr->dst = *dst;
     hdr->sum = cksum16((uint16_t *)hdr, hlen, 0);
     memcpy(hdr + 1, buf, len);
@@ -568,17 +575,20 @@ ip_generate_id (void) {
 ssize_t
 ip_tx (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t len, const ip_addr_t *dst) {
     struct ip_route *route;
-    ip_addr_t *nexthop = NULL;
+    ip_addr_t *nexthop = NULL, *src = NULL;
     uint16_t id, flag, offset;
     size_t done, slen;
 
     if (netif && *dst == IP_ADDR_BROADCAST) {
         nexthop = NULL;
     } else {
-        route = ip_route_lookup(netif, dst);
+        route = ip_route_lookup(NULL, dst);
         if (!route) {
             fprintf(stderr, "ip no route to host.\n");
             return -1;
+        }
+        if (netif) {
+            src = &((struct netif_ip *)netif)->unicast;
         }
         netif = route->netif;
         nexthop = (ip_addr_t *)(route->nexthop ? &route->nexthop : dst);
@@ -588,7 +598,7 @@ ip_tx (struct netif *netif, uint8_t protocol, const uint8_t *buf, size_t len, co
         slen = MIN((len - done), (size_t)(netif->dev->mtu - IP_HDR_SIZE_MIN));
         flag = ((done + slen) < len) ? 0x2000 : 0x0000;
         offset = flag | ((done >> 3) & 0x1fff);
-        if (ip_tx_core(netif, protocol, buf + done, slen, dst, nexthop, id, offset) == -1) {
+        if (ip_tx_core(netif, protocol, buf + done, slen, src, dst, nexthop, id, offset) == -1) {
             return -1;
         }
     }
