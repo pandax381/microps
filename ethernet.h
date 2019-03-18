@@ -35,7 +35,5 @@ ethernet_addr_ntop (const ethernet_addr_t *n, char *p, size_t size);
 
 extern int
 ethernet_init (void);
-extern int
-ethernet_open (struct netdev *dev);
 
 #endif

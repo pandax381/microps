@@ -12,30 +12,28 @@
 #include "util.h"
 #include "raw.h"
 
-struct raw_device {
-    char name[IFNAMSIZ];
+struct raw_socket_priv {
     int fd;
 };
 
-struct raw_device *
-raw_open (const char *name) {
-    struct raw_device *dev;
+static int
+raw_socket_open (struct rawdev *dev) {
+    struct raw_socket_priv *priv;
     struct ifreq ifr;
     struct sockaddr_ll sockaddr;
 
-    dev = malloc(sizeof(struct raw_device));
-    if (!dev) {
+    priv = malloc(sizeof(struct raw_socket_priv));
+    if (!priv) {
         fprintf(stderr, "malloc: failure\n");
         goto ERROR;
     }
-    dev->fd = socket(PF_PACKET, SOCK_RAW, hton16(ETH_P_ALL));
-    if (dev->fd == -1) {
+    priv->fd = socket(PF_PACKET, SOCK_RAW, hton16(ETH_P_ALL));
+    if (priv->fd == -1) {
         perror("socket");
         goto ERROR;
     }
-    strncpy(dev->name, name, sizeof(dev->name) - 1);
-    strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name) - 1);
-    if (ioctl(dev->fd, SIOCGIFINDEX, &ifr) == -1) {
+    strncpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name) - 1);
+    if (ioctl(priv->fd, SIOCGIFINDEX, &ifr) == -1) {
         perror("ioctl [SIOCGIFINDEX]");
         goto ERROR;
     }
@@ -43,62 +41,77 @@ raw_open (const char *name) {
     sockaddr.sll_family = AF_PACKET;
     sockaddr.sll_protocol = hton16(ETH_P_ALL);
     sockaddr.sll_ifindex = ifr.ifr_ifindex;
-    if (bind(dev->fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
+    if (bind(priv->fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
         perror("bind");
         goto ERROR;
     }
-    if (ioctl(dev->fd, SIOCGIFFLAGS, &ifr) == -1) {
+    if (ioctl(priv->fd, SIOCGIFFLAGS, &ifr) == -1) {
         perror("ioctl [SIOCGIFFLAGS]");
         goto ERROR;
     }
     ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC;
-    if (ioctl(dev->fd, SIOCSIFFLAGS, &ifr) == -1) {
+    if (ioctl(priv->fd, SIOCSIFFLAGS, &ifr) == -1) {
         perror("ioctl [SIOCSIFFLAGS]");
         goto ERROR;
     }
-    return dev;
+    dev->priv = priv;
+    return 0;
 
 ERROR:
-    if (dev) {
-        raw_close(dev);
+    if (priv) {
+        if (priv->fd == -1) {
+            close(priv->fd);
+        }
+        free(priv);
     }
-    return NULL;
+    return -1;
 }
 
-void
-raw_close (struct raw_device *dev) {
-    if (dev->fd != -1) {
-        close(dev->fd);
+static void
+raw_socket_close (struct rawdev *dev) {
+    struct raw_socket_priv *priv;
+
+    priv = (struct raw_socket_priv *)dev->priv;
+    if (priv) {
+        if (priv->fd != -1) {
+            close(priv->fd);
+        }
+        free(priv);
     }
-    free(dev);
+    dev->priv = NULL;
 }
 
-void
-raw_rx (struct raw_device *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+static void
+raw_socket_rx (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+    struct raw_socket_priv *priv;
     struct pollfd pfd;
     ssize_t ret, length;
     uint8_t buffer[2048];
 
-    pfd.fd = dev->fd;
+    priv = (struct raw_socket_priv *)dev->priv;
+    pfd.fd = priv->fd;
     pfd.events = POLLIN;
     ret = poll(&pfd, 1, timeout);
     if (ret <= 0) {
         return;
     }
-    length = read(dev->fd, buffer, sizeof(buffer));
+    length = read(priv->fd, buffer, sizeof(buffer));
     if (length <= 0) {
         return;
     }
     callback(buffer, length, arg);
 }
 
-ssize_t
-raw_tx (struct raw_device *dev, const uint8_t *buffer, size_t length) {
-    return write(dev->fd, buffer, length);
+static ssize_t
+raw_socket_tx (struct rawdev *dev, const uint8_t *buffer, size_t length) {
+    struct raw_socket_priv *priv;
+
+    priv = (struct raw_socket_priv *)dev->priv;
+    return write(priv->fd, buffer, length);
 }
 
-int
-raw_addr (struct raw_device *dev, uint8_t *dst, size_t size) {
+static int
+raw_socket_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
     int soc;
     struct ifreq ifr;
 
@@ -118,3 +131,17 @@ raw_addr (struct raw_device *dev, uint8_t *dst, size_t size) {
     close(soc);
     return 0;
 }
+
+static struct rawdev_ops raw_socket_ops = {
+    .open = raw_socket_open,
+    .close = raw_socket_close,
+    .rx = raw_socket_rx,
+    .tx = raw_socket_tx,
+    .addr = raw_socket_addr,
+};
+
+int
+raw_socket_init (void) {
+    return rawdev_register(RAWDEV_TYPE_SOCKET, &raw_socket_ops);
+}
+

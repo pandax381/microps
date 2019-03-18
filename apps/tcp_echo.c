@@ -5,6 +5,8 @@
 #include <sys/types.h>
 #include "microps.h"
 #include "util.h"
+#include "raw.h"
+#include "net.h"
 #include "ethernet.h"
 #include "dhcp.h"
 #include "tcp.h"
@@ -94,7 +96,7 @@ init (int argc, char *argv[]) {
     if (hwaddr) {
         ethernet_addr_pton(hwaddr, (ethernet_addr_t *)dev->addr);
     }
-    if (dev->ops->open(dev) == -1) {
+    if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         fprintf(stderr, "dev->ops->open(): error\n");
         return -1;
     }

@@ -18,7 +18,7 @@ struct ethernet_hdr {
 
 struct ethernet_priv {
     struct netdev *dev;
-    struct raw_device *raw;
+    struct rawdev *raw;
     pthread_t thread;
     int terminate;
 };
@@ -85,24 +85,31 @@ ethernet_dump (struct netdev *dev, uint8_t *frame, size_t flen) {
 }
 
 int
-ethernet_open (struct netdev *dev) {
+ethernet_open (struct netdev *dev, int opt) {
     struct ethernet_priv *priv;
+    struct rawdev *raw;
 
     priv = malloc(sizeof(struct ethernet_priv));
     if (!priv) {
-        return -1;;
+        return -1;
     }
-    priv->raw = raw_open(dev->name);
-    if (!priv->raw) {
+    raw = rawdev_alloc(opt, dev->name);
+    if (!raw) {
         free(priv);
         return -1;
     }
+    if (raw->ops->open(raw) == -1) {
+        free(raw);
+        free(priv);
+        return -1;
+    }
+    priv->raw = raw;
     priv->thread = pthread_self();
     priv->terminate = 0;
     priv->dev = dev;
     dev->priv = priv;
     if (memcmp(dev->addr, &ETHERNET_ADDR_ANY, ETHERNET_ADDR_LEN) == 0) {
-        raw_addr(priv->raw, dev->addr, ETHERNET_ADDR_LEN);
+        raw->ops->addr(raw, dev->addr, ETHERNET_ADDR_LEN);
     }
     memcpy(dev->broadcast, &ETHERNET_ADDR_BROADCAST, ETHERNET_ADDR_LEN);
     return 0;
@@ -121,7 +128,7 @@ ethernet_close (struct netdev *dev) {
         pthread_join(priv->thread, NULL);
     }
     if (priv->raw) {
-        raw_close(priv->raw);
+        priv->raw->ops->close(priv->raw);
     }
     free(priv);
     return 0;
@@ -161,7 +168,7 @@ ethernet_rx_thread (void *arg) {
     dev = (struct netdev *)arg;
     priv = (struct ethernet_priv *)dev->priv;
     while (!priv->terminate) {
-        raw_rx(priv->raw, ethernet_rx, dev, 1000);
+        priv->raw->ops->rx(priv->raw, ethernet_rx, dev, 1000);
     }
     return NULL;
 }
@@ -214,7 +221,7 @@ ethernet_tx (struct netdev *dev, uint16_t type, const uint8_t *payload, size_t p
     fprintf(stderr, ">>> ethernet_tx <<<\n");
     ethernet_dump(dev, frame, flen);
 #endif
-    return raw_tx(priv->raw, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
+    return priv->raw->ops->tx(priv->raw, frame, flen) == (ssize_t)flen ? (ssize_t)plen : -1;
 }
 
 struct netdev_ops ethernet_ops = {
@@ -227,6 +234,7 @@ struct netdev_ops ethernet_ops = {
 
 int
 ethernet_init (void) {
+    rawdev_init();
     if (netdev_register_driver(NETDEV_TYPE_ETHERNET, ETHERNET_PAYLOAD_SIZE_MAX, NETDEV_FLAG_BROADCAST, ETHERNET_HDR_SIZE, ETHERNET_ADDR_LEN, &ethernet_ops) == -1) {
         return -1;
     }

@@ -42,11 +42,12 @@ slip_dump (struct netdev *dev, uint8_t *packet, size_t plen) {
 }
 
 static int
-slip_open (struct netdev *dev) {
+slip_open (struct netdev *dev, int opt) {
     struct slip_priv *priv;
     struct stat st;
     struct sockaddr_un addr;
 
+    (void)opt;
     priv = malloc(sizeof(struct slip_priv));
     if (!priv) {
         fprintf(stderr, "malloc(): error\n");

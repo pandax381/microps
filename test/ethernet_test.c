@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
+#include "raw.h"
 #include "net.h"
 #include "ethernet.h"
 
@@ -34,7 +35,7 @@ main (int argc, char *argv[]) {
         return -1;
     }
     strncpy(dev->name, argv[1], sizeof(dev->name) -1);
-    if (dev->ops->open(dev) == -1) {
+    if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         return -1;
     }
     dev->ops->run(dev);

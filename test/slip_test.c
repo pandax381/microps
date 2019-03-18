@@ -34,7 +34,7 @@ main (int argc, char *argv[]) {
         return -1;
     }
     strncpy(dev->name, argv[1], sizeof(dev->name) -1);
-    if (dev->ops->open(dev) == -1) {
+    if (dev->ops->open(dev, 0) == -1) {
         return -1;
     }
     dev->ops->run(dev);

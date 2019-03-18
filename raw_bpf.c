@@ -18,102 +18,113 @@
 
 #define BPF_DEVICE_NUM 4
 
-struct raw_device {
-    char name[IFNAMSIZ];
+struct raw_bpf_priv {
     int fd;
     int buffer_size;
     char *buffer;
 };
 
-struct raw_device *
-raw_open (const char *name) {
-    struct raw_device *dev;
+static int
+raw_bpf_open (struct rawdev *dev) {
+    struct raw_bpf_priv *priv;
     int index, disable = 0, enable = 1;
     char path[16];
     struct ifreq ifr;
 
-    dev = malloc(sizeof(struct raw_device));
-    if (!dev) {
+    priv = malloc(sizeof(struct raw_bpf_priv));
+    if (!priv) {
         fprintf(stderr, "malloc: failure\n");
         goto ERROR;
     }
-    strncpy(dev->name, name, sizeof(dev->name)-1);
-    dev->fd = -1;
-    dev->buffer_size = 0;
-    dev->buffer = NULL;
+    priv->fd = -1;
+    priv->buffer_size = 0;
+    priv->buffer = NULL;
     for (index = 0; index < BPF_DEVICE_NUM; index++) {
         snprintf(path, sizeof(path), "/dev/bpf%d", index);
-        dev->fd = open(path, O_RDWR, 0);
-        if (dev->fd != -1) {
+        priv->fd = open(path, O_RDWR, 0);
+        if (priv->fd != -1) {
             break;
         }
     }
-    if (dev->fd == -1) {
+    if (priv->fd == -1) {
         perror("open");
         goto ERROR;
     }
     strncpy(ifr.ifr_name, dev->name, IFNAMSIZ - 1);
-    if (ioctl(dev->fd, BIOCSETIF, &ifr) == -1) {
+    if (ioctl(priv->fd, BIOCSETIF, &ifr) == -1) {
         perror("ioctl [BIOCSETIF]");
         goto ERROR;
     }
-    if (ioctl(dev->fd, BIOCGBLEN, &dev->buffer_size) == -1) {
+    if (ioctl(priv->fd, BIOCGBLEN, &priv->buffer_size) == -1) {
         perror("ioctl [BIOCGBLEN]");
         goto ERROR;
     }
-    dev->buffer = malloc(dev->buffer_size);
-    if (!dev->buffer) {
+    priv->buffer = malloc(priv->buffer_size);
+    if (!priv->buffer) {
         fprintf(stderr, "malloc: failure\n");
         goto ERROR;
     }
-    if (ioctl(dev->fd, BIOCPROMISC, NULL) == -1) {
+    if (ioctl(priv->fd, BIOCPROMISC, NULL) == -1) {
         perror("ioctl [BIOCPROMISC]");
         goto ERROR;
     }
-    if (ioctl(dev->fd, BIOCSSEESENT, &disable) == -1) {
+    if (ioctl(priv->fd, BIOCSSEESENT, &disable) == -1) {
         perror("ioctl [BIOCSSEESENT]");
         goto ERROR;
     }
-    if (ioctl(dev->fd, BIOCIMMEDIATE, &enable) == -1) {
+    if (ioctl(priv->fd, BIOCIMMEDIATE, &enable) == -1) {
         perror("ioctl [BIOCIMMEDIATE]");
         goto ERROR;
     }
-    if (ioctl(dev->fd, BIOCSHDRCMPLT, &enable) == -1) {
+    if (ioctl(priv->fd, BIOCSHDRCMPLT, &enable) == -1) {
         perror("ioctl [BIOCSHDRCMPLT]");
         goto ERROR;
     }
 #ifdef BIOCFEEDBACK
-    if (ioctl(dev->fd, BIOCFEEDBACK, &enable) == -1) {
+    if (ioctl(priv->fd, BIOCFEEDBACK, &enable) == -1) {
         perror("ioctl [BIOCFEEDBACK]");
         goto ERROR;
     }
 #endif
-    return dev;
+    dev->priv = priv;
+    return 0;
 
 ERROR:
-    if (dev) {
-        raw_close(dev);
+    if (priv) {
+        if (priv->fd != -1) {
+            close(priv->fd);
+            free(priv->buffer);
+        }
+        free(priv);
     }
-    return NULL;
+    return -1;
 }
 
-void
-raw_close (struct raw_device *dev) {
-    if (dev->fd != -1) {
-        close(dev->fd);
-        free(dev->buffer);
+static void
+raw_bpf_close (struct rawdev *dev) {
+    struct raw_bpf_priv *priv;
+
+    priv = (struct raw_bpf_priv *)dev->priv;
+    if (priv) {
+        if (priv->fd != -1) {
+            close(priv->fd);
+            free(priv->buffer);
+        }
+        free(priv);
     }
-    free(dev);
+    dev->priv = NULL;
 }
 
-void
-raw_rx (struct raw_device *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+static void
+raw_bpf_rx (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+    struct raw_bpf_priv *priv;
     struct pollfd pfd;
     int ret;
     ssize_t length;
     struct bpf_hdr *hdr;
 
-    pfd.fd = dev->fd;
+    priv = (struct raw_bpf_priv *)dev->priv;
+    pfd.fd = priv->fd;
     pfd.events = POLLIN;
     ret = poll(&pfd, 1, timeout);
     if (ret <= 0) {
@@ -122,27 +133,30 @@ raw_rx (struct raw_device *dev, void (*callback)(uint8_t *, size_t, void *), voi
         }
         return;
     }
-    length = read(dev->fd, dev->buffer, dev->buffer_size);
+    length = read(priv->fd, priv->buffer, priv->buffer_size);
     if (length <= 0) {
         if (length == -1 && errno != EINTR) {
             perror("read");
         }
         return;
     }
-    hdr = (struct bpf_hdr *)dev->buffer;
-    while ((caddr_t)hdr < (caddr_t)dev->buffer + length) {
+    hdr = (struct bpf_hdr *)priv->buffer;
+    while ((caddr_t)hdr < (caddr_t)priv->buffer + length) {
         callback((uint8_t *)((caddr_t)hdr + hdr->bh_hdrlen), hdr->bh_caplen, arg);
         hdr = (struct bpf_hdr *)((caddr_t)hdr + BPF_WORDALIGN(hdr->bh_hdrlen + hdr->bh_caplen));
     }
 }
 
-ssize_t
-raw_tx (struct raw_device *dev, const uint8_t *buffer, size_t length) {
-    return write(dev->fd, buffer, length);
+static ssize_t
+raw_bpf_tx (struct rawdev *dev, const uint8_t *buffer, size_t length) {
+    struct raw_bpf_priv *priv;
+
+    priv = (struct raw_bpf_priv *)dev->priv;
+    return write(priv->fd, buffer, length);
 }
 
-int
-raw_addr (struct raw_device *dev, uint8_t *dst, size_t size) {
+static int
+raw_bpf_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
     struct ifaddrs *ifas, *ifa;
     struct sockaddr_dl *dl;
 
@@ -160,4 +174,17 @@ raw_addr (struct raw_device *dev, uint8_t *dst, size_t size) {
         }
     }
     return -1;
+}
+
+struct rawdev_ops raw_bpf_ops = {
+    .open = raw_bpf_open,
+    .close = raw_bpf_close,
+    .rx = raw_bpf_rx,
+    .tx = raw_bpf_tx,
+    .addr = raw_bpf_addr
+};
+
+int
+raw_bpf_init (void) {
+    return rawdev_register(RAWDEV_TYPE_BPF, &raw_bpf_ops);
 }

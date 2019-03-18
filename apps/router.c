@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include "microps.h"
+#include "raw.h"
 #include "ethernet.h"
 #include "ip.h"
 #include "util.h"
@@ -48,7 +49,7 @@ ifsetup (struct interface *ifc) {
     if (ifc->hwaddr) {
         ethernet_addr_pton(ifc->hwaddr, (ethernet_addr_t *)dev->addr);
     }
-    if (dev->ops->open(dev) == -1) {
+    if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         fprintf(stderr, "dev->ops->open(): error\n");
         return -1;
     }

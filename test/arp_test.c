@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
+#include "raw.h"
 #include "net.h"
 #include "ethernet.h"
 #include "arp.h"
@@ -44,7 +45,7 @@ main (int argc, char *argv[]) {
     if (hwaddr) {
         ethernet_addr_pton(hwaddr, (ethernet_addr_t *)dev->addr);
     }
-    if (dev->ops->open(dev) == -1) {
+    if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         return -1;
     }
     iface.netif.family = NETIF_FAMILY_IPV4;

@@ -22,23 +22,29 @@ dump (uint8_t *frame, size_t len, void *arg) {
 
 int
 main (int argc, char *argv[]) {
-    char *ifname;
-    struct raw_device *dev;
+    struct rawdev *raw;
 
+    signal(SIGINT, on_signal);
     if (argc != 2) {
         fprintf(stderr, "usage: %s interface\n", argv[0]);
         return -1;
     }
-    ifname = argv[1];
-    signal(SIGINT, on_signal);
-    dev = raw_open(ifname);
-    if (!dev) {
-        fprintf(stderr, "raw_open(): failure - (%s)\n", ifname);
+    if (rawdev_init() == -1) {
+        fprintf(stderr, "rawdev_init(): error\n");
+        return -1;
+    }
+    raw = rawdev_alloc(RAWDEV_TYPE_AUTO, argv[1]);
+    if (!raw) {
+        fprintf(stderr, "rawdev_alloc(): error\n");
+        return -1;
+    }
+    if (raw->ops->open(raw) == -1) {
+        fprintf(stderr, "raw_device_open(): failure - (%s)\n", raw->name);
         return -1;
     }
     while (!terminate) {
-        raw_rx(dev, dump, ifname, 1000);
+        raw->ops->rx(raw, dump, raw->name, 1000);
     }
-    raw_close(dev);
+    raw->ops->close(raw);
     return 0;
 }

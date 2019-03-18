@@ -32,7 +32,7 @@ struct netif {
 };
 
 struct netdev_ops {
-    int (*open)(struct netdev *dev);
+    int (*open)(struct netdev *dev, int opt);
     int (*close)(struct netdev *dev);
     int (*run)(struct netdev *dev);
     int (*stop)(struct netdev *dev);
