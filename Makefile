@@ -22,7 +22,7 @@ OBJS = util.o \
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
-	OBJS := $(OBJS) raw_tap.o
+	OBJS := $(OBJS) raw_socket.o
 	CFLAGS := $(CFLAGS) -lpthread -pthread
 endif
 
