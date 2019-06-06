@@ -4,116 +4,50 @@
 #include <stdint.h>
 #include "raw.h"
 
+#define RAW_DEV_DECLARE(TYPE) \
+    static int \
+    TYPE##_dev_open_wrap (struct rawdev *raw) { \
+        raw->priv = TYPE##_dev_open(raw->name); \
+        return raw->priv ? 0 : -1; \
+    } \
+    static void \
+    TYPE##_dev_close_wrap (struct rawdev *raw) { \
+        TYPE##_dev_close(raw->priv); \
+    } \
+    \
+    static void \
+    TYPE##_dev_rx_wrap (struct rawdev *raw, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) { \
+        TYPE##_dev_rx(raw->priv, callback, arg, timeout); \
+    } \
+    static ssize_t \
+    TYPE##_dev_tx_wrap (struct rawdev *raw, const uint8_t *buf, size_t len) { \
+        return TYPE##_dev_tx(raw->priv, buf, len); \
+    } \
+    static int \
+    TYPE##_dev_addr_wrap (struct rawdev *raw, uint8_t *dst, size_t size) { \
+        return TYPE##_dev_addr(raw->name, dst, size); \
+    } \
+    struct rawdev_ops TYPE##_dev_ops = { \
+        .open = TYPE##_dev_open_wrap, \
+        .close = TYPE##_dev_close_wrap, \
+        .rx = TYPE##_dev_rx_wrap, \
+        .tx = TYPE##_dev_tx_wrap, \
+        .addr = TYPE##_dev_addr_wrap, \
+    }; \
+
 #include "raw/tap.h"
-
-static int
-tap_dev_open_wrap (struct rawdev *raw) {
-    raw->priv = tap_dev_open(raw->name);
-    return raw->priv ? 0 : -1;
-}
-
-static void
-tap_dev_close_wrap (struct rawdev *raw) {
-    tap_dev_close(raw->priv);
-}
-
-static void
-tap_dev_rx_wrap (struct rawdev *raw, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
-    tap_dev_rx(raw->priv, callback, arg, timeout);
-}
-
-static ssize_t
-tap_dev_tx_wrap (struct rawdev *raw, const uint8_t *buf, size_t len) {
-    return tap_dev_tx(raw->priv, buf, len);
-}
-
-static int
-tap_dev_addr_wrap (struct rawdev *raw, uint8_t *dst, size_t size) {
-    return tap_dev_addr(raw->name, dst, size);
-}
-
-struct rawdev_ops tap_dev_ops = {
-    .open = tap_dev_open_wrap,
-    .close = tap_dev_close_wrap,
-    .rx = tap_dev_rx_wrap,
-    .tx = tap_dev_tx_wrap,
-    .addr = tap_dev_addr_wrap,
-};
+RAW_DEV_DECLARE(tap)
 
 #ifdef __linux__
 #include "raw/soc.h"
-
-static int
-soc_dev_open_wrap (struct rawdev *raw) {
-    raw->priv = soc_dev_open(raw->name);
-    return raw->priv ? 0 : -1;
-}
-
-static void
-soc_dev_close_wrap (struct rawdev *raw) {
-    soc_dev_close(raw->priv);
-}
-
-static void
-soc_dev_rx_wrap (struct rawdev *raw, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
-    soc_dev_rx(raw->priv, callback, arg, timeout);
-}
-
-static ssize_t
-soc_dev_tx_wrap (struct rawdev *raw, const uint8_t *buf, size_t len) {
-    return soc_dev_tx(raw->priv, buf, len);
-}
-
-static int
-soc_dev_addr_wrap (struct rawdev *raw, uint8_t *dst, size_t size) {
-    return soc_dev_addr(raw->name, dst, size);
-}
-
-struct rawdev_ops soc_dev_ops = {
-    .open = soc_dev_open_wrap,
-    .close = soc_dev_close_wrap,
-    .rx = soc_dev_rx_wrap,
-    .tx = soc_dev_tx_wrap,
-    .addr = soc_dev_addr_wrap,
-};
+RAW_DEV_DECLARE(soc)
+static const uint8_t default_type = RAWDEV_TYPE_SOCKET;
 #endif
 
 #ifdef __APPLE__
 #include "raw/bpf.h"
-
-static int
-bpf_dev_open_wrap (struct rawdev *raw) {
-    raw->priv = bpf_dev_open(raw->name);
-    return raw->priv ? 0 : -1;
-}
-
-static void
-bpf_dev_close_wrap (struct rawdev *raw) {
-    bpf_dev_close(raw->priv);
-}
-
-static void
-bpf_dev_rx_wrap (struct rawdev *raw, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
-    bpf_dev_rx(raw->priv, callback, arg, timeout);
-}
-
-static ssize_t
-bpf_dev_tx_wrap (struct rawdev *raw, const uint8_t *buf, size_t len) {
-    return bpf_dev_tx(raw->priv, buf, len);
-}
-
-static int
-bpf_dev_addr_wrap (struct rawdev *raw, uint8_t *dst, size_t size) {
-    return bpf_dev_addr(raw->name, dst, size);
-}
-
-struct rawdev_ops bpf_dev_ops = {
-    .open = bpf_dev_open_wrap,
-    .close = bpf_dev_close_wrap,
-    .rx = bpf_dev_rx_wrap,
-    .tx = bpf_dev_tx_wrap,
-    .addr = bpf_dev_addr_wrap,
-};
+RAW_DEV_DECLARE(bpf)
+static const uint8_t default_type = RAWDEV_TYPE_BPF;
 #endif
 
 static uint8_t
@@ -121,12 +55,7 @@ rawdev_detect_type (char *name) {
     if (strncmp(name, "tap", 3) == 0) {
         return RAWDEV_TYPE_TAP;
     }
-#ifdef __linux__
-    return RAWDEV_TYPE_SOCKET;
-#endif
-#ifdef __APPLE__
-    return RAWDEV_TYPE_BPF;
-#endif
+    return default_type;
 }
 
 struct rawdev *
