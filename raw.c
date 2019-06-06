@@ -41,13 +41,13 @@ RAW_DEV_DECLARE(tap)
 #ifdef __linux__
 #include "raw/soc.h"
 RAW_DEV_DECLARE(soc)
-static const uint8_t default_type = RAWDEV_TYPE_SOCKET;
+#define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_SOCKET
 #endif
 
 #ifdef __APPLE__
 #include "raw/bpf.h"
 RAW_DEV_DECLARE(bpf)
-static const uint8_t default_type = RAWDEV_TYPE_BPF;
+#define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_BPF
 #endif
 
 static uint8_t
@@ -55,7 +55,7 @@ rawdev_detect_type (char *name) {
     if (strncmp(name, "tap", 3) == 0) {
         return RAWDEV_TYPE_TAP;
     }
-    return default_type;
+    return RAWDEV_TYPE_DEFAULT;
 }
 
 struct rawdev *
