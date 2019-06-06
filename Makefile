@@ -23,13 +23,13 @@ OBJS = util.o \
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
-	OBJS := $(OBJS) raw_socket.o raw_tap.o
+	OBJS := $(OBJS) raw/soc.o raw/tap.o
 	CFLAGS := $(CFLAGS) -lpthread -pthread -DHAVE_TAP
 endif
 
 ifeq ($(shell uname),Darwin)
-	OBJS := $(OBJS) raw_bpf.o
-#	OBJS := $(OBJS) raw_tap.o
+	OBJS := $(OBJS) raw/bpf.o
+#	OBJS := $(OBJS) raw/tap.o
 #	CFLAGS := $(CFLAGS) -DHAVE_TAP
 endif
 

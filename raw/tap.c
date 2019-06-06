@@ -21,7 +21,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 #include "util.h"
-#include "raw.h"
+#include "tap.h"
 
 #ifdef __linux__
 #define CLONE_DEVICE "/dev/net/tun"
@@ -29,13 +29,16 @@
 #define TAP_DEVICE_NUM 10
 #endif
 
-struct raw_tap_priv {
+struct tap_dev {
     int fd;
 };
 
-static int
-raw_tap_open (struct rawdev *dev) {
-    struct raw_tap_priv *priv;
+void
+tap_dev_close (struct tap_dev *dev);
+
+struct tap_dev *
+tap_dev_open (char *name) {
+    struct tap_dev *dev;
 #ifdef __linux__
     struct ifreq ifr;
 #else
@@ -43,92 +46,78 @@ raw_tap_open (struct rawdev *dev) {
     char path[16];
 #endif
 
-    priv = malloc(sizeof(struct raw_tap_priv));
-    if (!priv) {
+    dev = malloc(sizeof(struct tap_dev));
+    if (!dev) {
         fprintf(stderr, "malloc: failure\n");
         goto ERROR;
     }
 #ifdef __linux__
-    priv->fd = open(CLONE_DEVICE, O_RDWR);
+    dev->fd = open(CLONE_DEVICE, O_RDWR);
 #else
     for (index = 0; index < TAP_DEVICE_NUM; index++) {
         snprintf(path, sizeof(path), "/dev/tap%d", index);
-        priv->fd = open(path, O_RDWR);
-        if (priv->fd != -1) {
+        dev->fd = open(path, O_RDWR);
+        if (dev->fd != -1) {
             break;
         }
     }
 #endif
-    if (priv->fd == -1) {
+    if (dev->fd == -1) {
         perror("open");
         goto ERROR;
     }
 #ifdef __linux
-    strncpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name) - 1);
+    strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name) - 1);
     ifr.ifr_flags = IFF_TAP | IFF_NO_PI;
-    if (ioctl(priv->fd, TUNSETIFF, &ifr) == -1) {
+    if (ioctl(dev->fd, TUNSETIFF, &ifr) == -1) {
         perror("ioctl [TUNSETIFF]");
         goto ERROR;
     }
 #endif
-    dev->priv = priv;
-    return 0;
+    return dev;
 
 ERROR:
-    if (priv) {
-        if (priv->fd != -1) {
-            close(priv->fd);
-        }
-        free(priv);
+    if (dev) {
+        tap_dev_close(dev);
     }
-    return -1;
+    return NULL;
 }
 
-static void
-raw_tap_close (struct rawdev *dev) {
-    struct raw_tap_priv *priv;
-
-    priv = dev->priv;
-    if (priv) {
-        if (priv->fd != -1) {
-            close(priv->fd);
-        }
-        free(priv);
+void
+tap_dev_close (struct tap_dev *dev) {
+    if (dev->fd != -1) {
+        close(dev->fd);
     }
-    dev->priv = NULL;
+    free(dev);
 }
 
-static void
-raw_tap_rx (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
-    struct raw_tap_priv *priv;
+void
+tap_dev_rx (struct tap_dev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
     struct pollfd pfd;
-    ssize_t ret, length;
-    uint8_t buffer[2048];
+    int ret;
+    ssize_t len;
+    uint8_t buf[2048];
 
-    priv = (struct raw_tap_priv *)dev->priv;
-    pfd.fd = priv->fd;
+    pfd.fd = dev->fd;
     pfd.events = POLLIN;
     ret = poll(&pfd, 1, timeout);
     if (ret <= 0) {
         return;
     }
-    length = read(priv->fd, buffer, sizeof(buffer));
-    if (length <= 0) {
+    len = read(dev->fd, buf, sizeof(buf));
+    if (len <= 0) {
         return;
     }
-    callback(buffer, length, arg);
+    callback(buf, len, arg);
 }
 
-static ssize_t
-raw_tap_tx (struct rawdev *dev, const uint8_t *buffer, size_t length) {
-    struct raw_tap_priv *priv;
-
-    priv = (struct raw_tap_priv *)dev->priv;
-    return write(priv->fd, buffer, length);
+ssize_t
+tap_dev_tx (struct tap_dev *dev, const uint8_t *buf, size_t len) {
+    return write(dev->fd, buf, len);
 }
 
-static int
-raw_tap_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
+int
+tap_dev_addr (char *name, uint8_t *dst, size_t size) {
 #ifdef __linux__
     int soc;
     struct ifreq ifr;
@@ -139,7 +128,7 @@ raw_tap_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
         return -1;
     }
     ifr.ifr_addr.sa_family = AF_INET;
-    strncpy(ifr.ifr_name, dev->name, sizeof(ifr.ifr_name) - 1);
+    strncpy(ifr.ifr_name, name, sizeof(ifr.ifr_name) - 1);
     if (ioctl(soc, SIOCGIFHWADDR, &ifr) == -1) {
         perror("ioctl [SIOCGIFHWADDR]");
         close(soc);
@@ -159,7 +148,7 @@ raw_tap_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
     for (ifa = ifas; ifa; ifa = ifa->ifa_next) {
         dl = (struct sockaddr_dl*)ifa->ifa_addr;
         if (dl->sdl_family == AF_LINK) {
-            if (strncmp(dev->name, dl->sdl_data, dl->sdl_nlen) == 0) {
+            if (strncmp(name, dl->sdl_data, dl->sdl_nlen) == 0) {
                 memcpy(dst, LLADDR(dl), size);
                 return 0;
             }
@@ -167,17 +156,4 @@ raw_tap_addr (struct rawdev *dev, uint8_t *dst, size_t size) {
     }
     return -1;
 #endif
-}
-
-static struct rawdev_ops raw_tap_ops = {
-    .open = raw_tap_open,
-    .close = raw_tap_close,
-    .rx = raw_tap_rx,
-    .tx = raw_tap_tx,
-    .addr = raw_tap_addr,
-};
-
-int
-raw_tap_init (void) {
-    return rawdev_register(RAWDEV_TYPE_TAP, &raw_tap_ops);
 }

@@ -29,13 +29,9 @@ main (int argc, char *argv[]) {
         fprintf(stderr, "usage: %s interface\n", argv[0]);
         return -1;
     }
-    if (rawdev_init() == -1) {
-        fprintf(stderr, "rawdev_init(): error\n");
-        return -1;
-    }
     raw = rawdev_alloc(RAWDEV_TYPE_AUTO, argv[1]);
     if (!raw) {
-        fprintf(stderr, "rawdev_alloc(): error\n");
+        fprintf(stderr, "ethraw_alloc(): error\n");
         return -1;
     }
     if (raw->ops->open(raw) == -1) {

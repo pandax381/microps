@@ -234,7 +234,6 @@ struct netdev_ops ethernet_ops = {
 
 int
 ethernet_init (void) {
-    rawdev_init();
     if (netdev_register_driver(NETDEV_TYPE_ETHERNET, ETHERNET_PAYLOAD_SIZE_MAX, NETDEV_FLAG_BROADCAST, ETHERNET_HDR_SIZE, ETHERNET_ADDR_LEN, &ethernet_ops) == -1) {
         return -1;
     }
