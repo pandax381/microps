@@ -24,12 +24,15 @@ CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
 	OBJS := $(OBJS) raw/soc.o raw/tap.o
+	TEST := $(TEST) test/raw_soc_test test/raw_tap_test
 	CFLAGS := $(CFLAGS) -lpthread -pthread -DHAVE_TAP
 endif
 
 ifeq ($(shell uname),Darwin)
 	OBJS := $(OBJS) raw/bpf.o
+	TEST := $(TEST) test/raw_bpf_test.o
 #	OBJS := $(OBJS) raw/tap.o
+#	TEST := $(TEST) test/raw_tap_test.o
 #	CFLAGS := $(CFLAGS) -DHAVE_TAP
 endif
 
