@@ -26,16 +26,16 @@ main (int argc, char *argv[]) {
 
     signal(SIGINT, on_signal);
     if (argc != 2) {
-        fprintf(stderr, "usage: %s interface\n", argv[0]);
+        fprintf(stderr, "usage: %s device\n", argv[0]);
         return -1;
     }
     raw = rawdev_alloc(RAWDEV_TYPE_AUTO, argv[1]);
     if (!raw) {
-        fprintf(stderr, "ethraw_alloc(): error\n");
+        fprintf(stderr, "rawdev_alloc(): error\n");
         return -1;
     }
     if (raw->ops->open(raw) == -1) {
-        fprintf(stderr, "raw_device_open(): failure - (%s)\n", raw->name);
+        fprintf(stderr, "raw->ops->open(): failure - (%s)\n", raw->name);
         return -1;
     }
     while (!terminate) {
