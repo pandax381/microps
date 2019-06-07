@@ -9,7 +9,6 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <poll.h>
-#include "util.h"
 #include "soc.h"
 
 struct soc_dev {
@@ -27,7 +26,7 @@ soc_dev_open (char *name) {
         fprintf(stderr, "malloc: failure\n");
         goto ERROR;
     }
-    dev->fd = socket(PF_PACKET, SOCK_RAW, hton16(ETH_P_ALL));
+    dev->fd = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (dev->fd == -1) {
         perror("socket");
         goto ERROR;
@@ -39,7 +38,7 @@ soc_dev_open (char *name) {
     }
     memset(&sockaddr, 0x00, sizeof(sockaddr));
     sockaddr.sll_family = AF_PACKET;
-    sockaddr.sll_protocol = hton16(ETH_P_ALL);
+    sockaddr.sll_protocol = htons(ETH_P_ALL);
     sockaddr.sll_ifindex = ifr.ifr_ifindex;
     if (bind(dev->fd, (struct sockaddr *)&sockaddr, sizeof(sockaddr)) == -1) {
         perror("bind");
@@ -117,3 +116,81 @@ soc_dev_addr (char *name, uint8_t *dst, size_t size) {
     close(fd);
     return 0;
 }
+
+#ifdef RAW_SOC_TEST
+#include <signal.h>
+
+volatile sig_atomic_t terminate;
+
+static void
+on_signal (int s) {
+    terminate = 1;
+}
+
+static void
+rx_handler (uint8_t *frame, size_t len, void *arg) {
+    fprintf(stderr, "receive %zu octets\n", len);
+}
+
+int
+main (int argc, char *argv[]) {
+    char *name;
+    struct soc_dev *dev;
+    uint8_t addr[6];
+
+    signal(SIGINT, on_signal);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s device\n", argv[0]);
+        return -1;
+    }
+    name = argv[1];
+    dev = soc_dev_open(argv[1]);
+    if (!dev) {
+        return -1;
+    }
+    soc_dev_addr(name, addr, sizeof(addr));
+    fprintf(stderr, "[%s] %02x:%02x:%02x:%02x:%02x:%02x\n",
+        name, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    while (!terminate) {
+        soc_dev_rx(dev, rx_handler, dev, 1000);
+    }
+    soc_dev_close(dev);
+    return 0;
+}
+#else
+#include "raw.h"
+
+static int
+soc_dev_open_wrap (struct rawdev *dev) {
+    dev->priv = soc_dev_open(dev->name);
+    return dev->priv ? 0 : -1;
+}
+
+static void
+soc_dev_close_wrap (struct rawdev *dev) {
+    soc_dev_close(dev->priv);
+}
+
+static void
+soc_dev_rx_wrap (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+    soc_dev_rx(dev->priv, callback, arg, timeout);
+}
+
+static ssize_t
+soc_dev_tx_wrap (struct rawdev *dev, const uint8_t *buf, size_t len) {
+    return soc_dev_tx(dev->priv, buf, len);
+}
+
+static int
+soc_dev_addr_wrap (struct rawdev *dev, uint8_t *dst, size_t size) {
+    return soc_dev_addr(dev->name, dst, size);
+}
+
+struct rawdev_ops soc_dev_ops = {
+    .open = soc_dev_open_wrap,
+    .close = soc_dev_close_wrap,
+    .rx = soc_dev_rx_wrap,
+    .tx = soc_dev_tx_wrap,
+    .addr = soc_dev_addr_wrap
+};
+#endif

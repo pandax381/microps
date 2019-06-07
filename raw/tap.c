@@ -20,7 +20,6 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <poll.h>
-#include "util.h"
 #include "tap.h"
 
 #ifdef __linux__
@@ -157,3 +156,81 @@ tap_dev_addr (char *name, uint8_t *dst, size_t size) {
     return -1;
 #endif
 }
+
+#ifdef RAW_TAP_TEST
+#include <signal.h>
+
+volatile sig_atomic_t terminate;
+
+static void
+on_signal (int s) {
+    terminate = 1;
+}
+
+static void
+rx_handler (uint8_t *frame, size_t len, void *arg) {
+    fprintf(stderr, "receive %zu octets\n", len);
+}
+
+int
+main (int argc, char *argv[]) {
+    char *name;
+    struct tap_dev *dev;
+    uint8_t addr[6];
+
+    signal(SIGINT, on_signal);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s device\n", argv[0]);
+        return -1;
+    }
+    name = argv[1];
+    dev = tap_dev_open(argv[1]);
+    if (!dev) {
+        return -1;
+    }
+    tap_dev_addr(name, addr, sizeof(addr));
+    fprintf(stderr, "[%s] %02x:%02x:%02x:%02x:%02x:%02x\n",
+        name, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    while (!terminate) {
+        tap_dev_rx(dev, rx_handler, dev, 1000);
+    }
+    tap_dev_close(dev);
+    return 0;
+}
+#else
+#include "raw.h"
+
+static int
+tap_dev_open_wrap (struct rawdev *dev) {
+    dev->priv = tap_dev_open(dev->name);
+    return dev->priv ? 0 : -1;
+}
+
+static void
+tap_dev_close_wrap (struct rawdev *dev) {
+    tap_dev_close(dev->priv);
+}
+
+static void
+tap_dev_rx_wrap (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+    tap_dev_rx(dev->priv, callback, arg, timeout);
+}
+
+static ssize_t
+tap_dev_tx_wrap (struct rawdev *dev, const uint8_t *buf, size_t len) {
+    return tap_dev_tx(dev->priv, buf, len);
+}
+
+static int
+tap_dev_addr_wrap (struct rawdev *dev, uint8_t *dst, size_t size) {
+    return tap_dev_addr(dev->name, dst, size);
+}
+
+struct rawdev_ops tap_dev_ops = {
+    .open = tap_dev_open_wrap,
+    .close = tap_dev_close_wrap,
+    .rx = tap_dev_rx_wrap,
+    .tx = tap_dev_tx_wrap,
+    .addr = tap_dev_addr_wrap
+};
+#endif

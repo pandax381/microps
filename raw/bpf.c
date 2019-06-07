@@ -159,3 +159,81 @@ bpf_dev_addr (char *name, uint8_t *dst, size_t size) {
     }
     return -1;
 }
+
+#ifdef RAW_BPF_TEST
+#include <signal.h>
+
+volatile sig_atomic_t terminate;
+
+static void
+on_signal (int s) {
+    terminate = 1;
+}
+
+static void
+rx_handler (uint8_t *frame, size_t len, void *arg) {
+    fprintf(stderr, "receive %zu octets\n", len);
+}
+
+int
+main (int argc, char *argv[]) {
+    char *name;
+    struct bpf_dev *dev;
+    uint8_t addr[6];
+
+    signal(SIGINT, on_signal);
+    if (argc != 2) {
+        fprintf(stderr, "usage: %s device\n", argv[0]);
+        return -1;
+    }
+    name = argv[1];
+    dev = bpf_dev_open(argv[1]);
+    if (!dev) {
+        return -1;
+    }
+    bpf_dev_addr(name, addr, sizeof(addr));
+    fprintf(stderr, "[%s] %02x:%02x:%02x:%02x:%02x:%02x\n",
+        name, addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
+    while (!terminate) {
+        bpf_dev_rx(dev, rx_handler, dev, 1000);
+    }
+    bpf_dev_close(dev);
+    return 0;
+}
+#else
+#include "raw.h"
+
+static int
+bpf_dev_open_wrap (struct rawdev *dev) {
+    dev->priv = bpf_dev_open(dev->name);
+    return dev->priv ? 0 : -1;
+}
+
+static void
+bpf_dev_close_wrap (struct rawdev *dev) {
+    bpf_dev_close(dev->priv);
+}
+
+static void
+bpf_dev_rx_wrap (struct rawdev *dev, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) {
+    bpf_dev_rx(dev->priv, callback, arg, timeout);
+}
+
+static ssize_t
+bpf_dev_tx_wrap (struct rawdev *dev, const uint8_t *buf, size_t len) {
+    return bpf_dev_tx(dev->priv, buf, len);
+}
+
+static int
+bpf_dev_addr_wrap (struct rawdev *dev, uint8_t *dst, size_t size) {
+    return bpf_dev_addr(dev->name, dst, size);
+}
+
+struct rawdev_ops bpf_dev_ops = {
+    .open = bpf_dev_open_wrap,
+    .close = bpf_dev_close_wrap,
+    .rx = bpf_dev_rx_wrap,
+    .tx = bpf_dev_tx_wrap,
+    .addr = bpf_dev_addr_wrap
+};
+#endif

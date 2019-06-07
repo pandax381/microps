@@ -4,50 +4,19 @@
 #include <stdint.h>
 #include "raw.h"
 
-#define RAW_DEV_DECLARE(TYPE) \
-    static int \
-    TYPE##_dev_open_wrap (struct rawdev *raw) { \
-        raw->priv = TYPE##_dev_open(raw->name); \
-        return raw->priv ? 0 : -1; \
-    } \
-    static void \
-    TYPE##_dev_close_wrap (struct rawdev *raw) { \
-        TYPE##_dev_close(raw->priv); \
-    } \
-    \
-    static void \
-    TYPE##_dev_rx_wrap (struct rawdev *raw, void (*callback)(uint8_t *, size_t, void *), void *arg, int timeout) { \
-        TYPE##_dev_rx(raw->priv, callback, arg, timeout); \
-    } \
-    static ssize_t \
-    TYPE##_dev_tx_wrap (struct rawdev *raw, const uint8_t *buf, size_t len) { \
-        return TYPE##_dev_tx(raw->priv, buf, len); \
-    } \
-    static int \
-    TYPE##_dev_addr_wrap (struct rawdev *raw, uint8_t *dst, size_t size) { \
-        return TYPE##_dev_addr(raw->name, dst, size); \
-    } \
-    struct rawdev_ops TYPE##_dev_ops = { \
-        .open = TYPE##_dev_open_wrap, \
-        .close = TYPE##_dev_close_wrap, \
-        .rx = TYPE##_dev_rx_wrap, \
-        .tx = TYPE##_dev_tx_wrap, \
-        .addr = TYPE##_dev_addr_wrap, \
-    }; \
-
 #include "raw/tap.h"
-RAW_DEV_DECLARE(tap)
+extern struct rawdev_ops tap_dev_ops;
 
 #ifdef __linux__
 #include "raw/soc.h"
-RAW_DEV_DECLARE(soc)
 #define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_SOCKET
+extern struct rawdev_ops soc_dev_ops;
 #endif
 
 #ifdef __APPLE__
 #include "raw/bpf.h"
-RAW_DEV_DECLARE(bpf)
 #define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_BPF
+extern struct rawdev_ops bpf_dev_ops;
 #endif
 
 static uint8_t
