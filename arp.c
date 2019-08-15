@@ -149,12 +149,11 @@ arp_entry_clear (struct arp_entry *entry) {
     memset(entry->ha, 0, ETHERNET_ADDR_LEN);
     entry->timestamp = 0;
     if (entry->data) {
-        /* TODO: Unreachable */
         free(entry->data);
         entry->data = NULL;
         entry->len = 0;
-        entry->netif = NULL;
     }
+    entry->netif = NULL;
     /* !!! Don't touch entry->cond !!! */
 }
 
@@ -293,7 +292,6 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, uint8_t *ha, const void *
                 if (entry->used) {
                     arp_entry_clear(entry);
                 }
-                /* TODO: Unreachable */
                 pthread_mutex_unlock(&mutex);
                 return ARP_RESOLVE_ERROR;
             }
@@ -302,22 +300,20 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, uint8_t *ha, const void *
         pthread_mutex_unlock(&mutex);
         return ARP_RESOLVE_FOUND;
     }
-    if (!data) {
-        pthread_mutex_unlock(&mutex);
-        return ARP_RESOLVE_ERROR;
-    }
     entry = arp_table_freespace();
     if (!entry) {
         pthread_mutex_unlock(&mutex);
         return ARP_RESOLVE_ERROR;
     }
-    entry->data = malloc(len);
-    if (!entry->data) {
-        pthread_mutex_unlock(&mutex);
-        return ARP_RESOLVE_ERROR;
+    if (data) {
+        entry->data = malloc(len);
+        if (!entry->data) {
+            pthread_mutex_unlock(&mutex);
+            return ARP_RESOLVE_ERROR;
+        }
+        memcpy(entry->data, data, len);
+        entry->len = len;
     }
-    memcpy(entry->data, data, len);
-    entry->len = len;
     entry->used = 1;
     entry->pa = *pa;
     time(&entry->timestamp);
