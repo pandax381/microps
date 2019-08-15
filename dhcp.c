@@ -59,8 +59,8 @@ struct dhcp_option {
 void
 dhcp_dump (const uint8_t *buf, size_t n) {
     struct dhcp *p;
-    char iaddr[IP_ADDR_STR_LEN+1];
-    char chaddr[ETHERNET_ADDR_STR_LEN+1];
+    char iaddr[IP_ADDR_STR_LEN];
+    char chaddr[ETHERNET_ADDR_STR_LEN];
     uint8_t *opt;
     size_t len;
 
@@ -80,7 +80,7 @@ dhcp_dump (const uint8_t *buf, size_t n) {
     fprintf(stderr, "yiaddr: %s\n", ip_addr_ntop(&p->yiaddr, iaddr, sizeof(iaddr)));
     fprintf(stderr, "siaddr: %s\n", ip_addr_ntop(&p->siaddr, iaddr, sizeof(iaddr)));
     fprintf(stderr, "giaddr: %s\n", ip_addr_ntop(&p->giaddr, iaddr, sizeof(iaddr)));
-    fprintf(stderr, "chaddr: %s\n", ethernet_addr_ntop((ethernet_addr_t *)p->chaddr, chaddr, sizeof(chaddr)));
+    fprintf(stderr, "chaddr: %s\n", ethernet_addr_ntop(p->chaddr, chaddr, sizeof(chaddr)));
     fprintf(stderr, " sname: %.64s\n", p->sname);
     fprintf(stderr, "  file: %.128s\n", p->file);
     fprintf(stderr, " magic: %02x %02x %02x %02x\n", p->magic[0], p->magic[1], p->magic[2], p->magic[3]);
@@ -99,7 +99,7 @@ dhcp_dump (const uint8_t *buf, size_t n) {
 }
 
 static void
-dhcp_build_discover_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, uint32_t xid) {
+dhcp_build_discover_message (uint8_t *buf, size_t size, uint8_t *chaddr, uint32_t xid) {
     struct dhcp *discover;
     uint8_t *opt;
 
@@ -110,7 +110,7 @@ dhcp_build_discover_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, 
     discover->hlen = 0x06;
     discover->xid = hton32(xid);
     discover->flags = hton16(DHCP_FLAG_BROADCAST);
-    memcpy(discover->chaddr, chaddr.addr, 6);
+    memcpy(discover->chaddr, chaddr, ETHERNET_ADDR_LEN);
     memcpy(discover->magic, DHCP_MAGIC_CODE, 4);
 
     // add dhcp vendor info
@@ -124,7 +124,7 @@ dhcp_build_discover_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, 
     *opt++ = 0x07;
     *opt++ = 0x01;
     // MAC addr
-    memcpy(opt, discover->chaddr, 6);
+    memcpy(opt, discover->chaddr, ETHERNET_ADDR_LEN);
     opt += 6;
     // Option request
     *opt++ = 0x37;
@@ -142,7 +142,7 @@ dhcp_build_discover_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, 
 }
 
 static void
-dhcp_build_request_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, uint32_t yiaddr, uint32_t siaddr, uint32_t xid, ip_addr_t *serverid) {
+dhcp_build_request_message (uint8_t *buf, size_t size, uint8_t *chaddr, uint32_t yiaddr, uint32_t siaddr, uint32_t xid, ip_addr_t *serverid) {
     struct dhcp *request;
     uint8_t *opt;
 
@@ -154,7 +154,7 @@ dhcp_build_request_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, u
     request->flags = hton16(DHCP_FLAG_BROADCAST);
     request->yiaddr = yiaddr;
     request->siaddr = siaddr;
-    memcpy(request->chaddr, chaddr.addr, 6);
+    memcpy(request->chaddr, chaddr, ETHERNET_ADDR_LEN);
     memcpy(request->magic, DHCP_MAGIC_CODE, 4);
 
     // vender part
@@ -168,7 +168,7 @@ dhcp_build_request_message (uint8_t *buf, size_t size, ethernet_addr_t chaddr, u
     *opt++ = 0x07;
     *opt++ = 0x01;
     // MAC addr
-    memcpy(opt, request->chaddr, 6);
+    memcpy(opt, request->chaddr, ETHERNET_ADDR_LEN);
     opt += 6;
     // request ip
     *opt++ = 0x32;
@@ -288,8 +288,8 @@ dhcp_init(struct netif *iface) {
     uint32_t yiaddr, siaddr, nmaddr, gwaddr;
     uint32_t xid = (uint32_t)time(NULL);
     struct dhcp *offer, *answer;
-    char addr[IP_ADDR_STR_LEN+1], netmask[IP_ADDR_STR_LEN+1], gateway[IP_ADDR_STR_LEN+1];
-    ethernet_addr_t chaddr;
+    char addr[IP_ADDR_STR_LEN], netmask[IP_ADDR_STR_LEN], gateway[IP_ADDR_STR_LEN];
+    uint8_t chaddr[ETHERNET_ADDR_LEN];
     ip_addr_t peer, serverid;
     uint16_t peer_port = hton16(DHCP_SERVER_PORT);
     struct dhcp_option *option;
@@ -304,7 +304,7 @@ dhcp_init(struct netif *iface) {
         fprintf(stderr, "udp sock bind failed.\n");
         goto ERROR;
     }
-    chaddr = *(ethernet_addr_t *)iface->dev->addr;
+    memcpy(chaddr, iface->dev->addr, ETHERNET_ADDR_LEN);
     peer = IP_ADDR_BROADCAST;
     /* DHCPDISCOVER */
     memset(sbuf, 0x00, sizeof(sbuf));

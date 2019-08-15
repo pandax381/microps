@@ -29,16 +29,16 @@ struct arp_hdr {
 
 struct arp_ethernet {
     struct arp_hdr hdr;
-    ethernet_addr_t sha;
+    uint8_t sha[ETHERNET_ADDR_LEN];
     ip_addr_t spa;
-    ethernet_addr_t tha;
+    uint8_t tha[ETHERNET_ADDR_LEN];
     ip_addr_t tpa;
 } __attribute__ ((packed));
 
 struct arp_entry {
     unsigned char used;
     ip_addr_t pa;
-    ethernet_addr_t ha;
+    uint8_t ha[ETHERNET_ADDR_LEN];
     time_t timestamp;
     pthread_cond_t cond;
     void *data;
@@ -72,9 +72,9 @@ arp_dump (uint8_t *packet, size_t plen) {
     fprintf(stderr, " hln: %u\n", message->hdr.hln);
     fprintf(stderr, " pln: %u\n", message->hdr.pln);
     fprintf(stderr, "  op: %u (%s)\n", ntoh16(message->hdr.op), arp_opcode_ntop(message->hdr.op));
-    fprintf(stderr, " sha: %s\n", ethernet_addr_ntop(&message->sha, addr, sizeof(addr)));
+    fprintf(stderr, " sha: %s\n", ethernet_addr_ntop(message->sha, addr, sizeof(addr)));
     fprintf(stderr, " spa: %s\n", ip_addr_ntop(&message->spa, addr, sizeof(addr)));
-    fprintf(stderr, " tha: %s\n", ethernet_addr_ntop(&message->tha, addr, sizeof(addr)));
+    fprintf(stderr, " tha: %s\n", ethernet_addr_ntop(message->tha, addr, sizeof(addr)));
     fprintf(stderr, " tpa: %s\n", ip_addr_ntop(&message->tpa, addr, sizeof(addr)));
 }
 
@@ -91,21 +91,21 @@ arp_table_select (const ip_addr_t *pa) {
 }
 
 static int
-arp_table_update (struct netdev *dev, const ip_addr_t *pa, const ethernet_addr_t *ha) {
+arp_table_update (struct netdev *dev, const ip_addr_t *pa, const uint8_t *ha) {
     struct arp_entry *entry;
 
     entry = arp_table_select(pa);
     if (!entry) {
         return -1;
     }
-    memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
+    memcpy(entry->ha, ha, ETHERNET_ADDR_LEN);
     time(&entry->timestamp);
     if (entry->data) {
         if (entry->netif->dev != dev) {
             /* warning: receive response from unintended device */
             dev = entry->netif->dev;
         }
-        dev->ops->tx(dev, ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, &entry->ha);
+        dev->ops->tx(dev, ETHERNET_TYPE_IP, (uint8_t *)entry->data, entry->len, entry->ha);
         free(entry->data);
         entry->data = NULL;
         entry->len = 0;
@@ -127,7 +127,7 @@ arp_table_freespace (void) {
 }
 
 static int
-arp_table_insert (const ip_addr_t *pa, const ethernet_addr_t *ha) {
+arp_table_insert (const ip_addr_t *pa, const uint8_t *ha) {
     struct arp_entry *entry;
 
     entry = arp_table_freespace();
@@ -136,7 +136,7 @@ arp_table_insert (const ip_addr_t *pa, const ethernet_addr_t *ha) {
     }
     entry->used = 1;
     entry->pa = *pa;
-    memcpy(&entry->ha, ha, sizeof(ethernet_addr_t));
+    memcpy(entry->ha, ha, ETHERNET_ADDR_LEN);
     time(&entry->timestamp);
     pthread_cond_broadcast(&entry->cond);
     return 0;
@@ -146,7 +146,7 @@ static void
 arp_entry_clear (struct arp_entry *entry) {
     entry->used = 0;
     entry->pa = 0;
-    memset(&entry->ha, 0, sizeof(ethernet_addr_t));
+    memset(entry->ha, 0, ETHERNET_ADDR_LEN);
     entry->timestamp = 0;
     if (entry->data) {
         /* TODO: Unreachable */
@@ -179,25 +179,25 @@ arp_send_request (struct netif *netif, const ip_addr_t *tpa) {
     }
     request.hdr.hrd = hton16(ARP_HRD_ETHERNET);
     request.hdr.pro = hton16(ETHERNET_TYPE_IP);
-    request.hdr.hln = 6;
-    request.hdr.pln = 4;
+    request.hdr.hln = ETHERNET_ADDR_LEN;
+    request.hdr.pln = IP_ADDR_LEN;
     request.hdr.op = hton16(ARP_OP_REQUEST);
-    memcpy(request.sha.addr, netif->dev->addr, sizeof(request.sha.addr));
+    memcpy(request.sha, netif->dev->addr, ETHERNET_ADDR_LEN);
     request.spa = ((struct netif_ip *)netif)->unicast;
-    memset(&request.tha, 0, ETHERNET_ADDR_LEN);
+    memset(request.tha, 0, ETHERNET_ADDR_LEN);
     request.tpa = *tpa;
 #ifdef DEBUG
     fprintf(stderr, ">>> arp_send_request <<<\n");
     arp_dump((uint8_t *)&request, sizeof(request));
 #endif
-    if (netif->dev->ops->tx(netif->dev, ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), (void *)&ETHERNET_ADDR_BROADCAST) == -1) {
+    if (netif->dev->ops->tx(netif->dev, ETHERNET_TYPE_ARP, (uint8_t *)&request, sizeof(request), ETHERNET_ADDR_BROADCAST) == -1) {
         return -1;
     }
     return 0;
 }
 
 static int
-arp_send_reply (struct netif *netif, const ethernet_addr_t *tha, const ip_addr_t *tpa, const ethernet_addr_t *dst) {
+arp_send_reply (struct netif *netif, const uint8_t *tha, const ip_addr_t *tpa, const uint8_t *dst) {
     struct arp_ethernet reply;
 
     if (!tha || !tpa) {
@@ -205,18 +205,18 @@ arp_send_reply (struct netif *netif, const ethernet_addr_t *tha, const ip_addr_t
     }
     reply.hdr.hrd = hton16(ARP_HRD_ETHERNET);
     reply.hdr.pro = hton16(ETHERNET_TYPE_IP);
-    reply.hdr.hln = 6;
-    reply.hdr.pln = 4;
+    reply.hdr.hln = ETHERNET_ADDR_LEN;
+    reply.hdr.pln = IP_ADDR_LEN;
     reply.hdr.op = hton16(ARP_OP_REPLY);
-    memcpy(reply.sha.addr, netif->dev->addr, sizeof(reply.sha.addr));
+    memcpy(reply.sha, netif->dev->addr, ETHERNET_ADDR_LEN);
     reply.spa = ((struct netif_ip *)netif)->unicast;
-    reply.tha = *tha;
+    memcpy(reply.tha, tha, ETHERNET_ADDR_LEN);
     reply.tpa = *tpa;
 #ifdef DEBUG
     fprintf(stderr, ">>> arp_send_reply <<<\n");
     arp_dump((uint8_t *)&reply, sizeof(reply));
 #endif
-    if (netif->dev->ops->tx(netif->dev, ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), (void *)dst) < 0) {
+    if (netif->dev->ops->tx(netif->dev, ETHERNET_TYPE_ARP, (uint8_t *)&reply, sizeof(reply), dst) < 0) {
         return -1;
     }
     return 0;
@@ -255,24 +255,24 @@ arp_rx (uint8_t *packet, size_t plen, struct netdev *dev) {
         timestamp = now;
         arp_table_patrol();
     }
-    marge = (arp_table_update(dev, &message->spa, &message->sha) == 0) ? 1 : 0;
+    marge = (arp_table_update(dev, &message->spa, message->sha) == 0) ? 1 : 0;
     pthread_mutex_unlock(&mutex);
     netif = netdev_get_netif(dev, NETIF_FAMILY_IPV4);
     if (netif && ((struct netif_ip *)netif)->unicast == message->tpa) {
         if (!marge) {
             pthread_mutex_lock(&mutex);
-            arp_table_insert(&message->spa, &message->sha);
+            arp_table_insert(&message->spa, message->sha);
             pthread_mutex_unlock(&mutex);
         }
         if (ntoh16(message->hdr.op) == ARP_OP_REQUEST) {
-            arp_send_reply(netif, &message->sha, &message->spa, &message->sha);
+            arp_send_reply(netif, message->sha, &message->spa, message->sha);
         }
     }
     return;
 }
 
 int
-arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, const void *data, size_t len) {
+arp_resolve (struct netif *netif, const ip_addr_t *pa, uint8_t *ha, const void *data, size_t len) {
     struct timeval now;
     struct timespec timeout;
     struct arp_entry *entry;
@@ -284,7 +284,7 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
     timeout.tv_nsec = now.tv_usec * 1000;
     entry = arp_table_select(pa);
     if (entry) {
-        if (memcmp(&entry->ha, &ETHERNET_ADDR_ANY, sizeof(ethernet_addr_t)) == 0) {
+        if (memcmp(entry->ha, ETHERNET_ADDR_ANY, ETHERNET_ADDR_LEN) == 0) {
             arp_send_request(netif, pa); /* just in case packet loss */
             do {
                 ret = pthread_cond_timedwait(&entry->cond, &mutex, &timeout);
@@ -298,7 +298,7 @@ arp_resolve (struct netif *netif, const ip_addr_t *pa, ethernet_addr_t *ha, cons
                 return ARP_RESOLVE_ERROR;
             }
         }
-        memcpy(ha, &entry->ha, sizeof(ethernet_addr_t));
+        memcpy(ha, entry->ha, ETHERNET_ADDR_LEN);
         pthread_mutex_unlock(&mutex);
         return ARP_RESOLVE_FOUND;
     }

@@ -11,10 +11,10 @@
 #include "ethernet.h"
 
 struct ethernet_hdr {
-    ethernet_addr_t dst;
-    ethernet_addr_t src;
+    uint8_t dst[ETHERNET_ADDR_LEN];
+    uint8_t src[ETHERNET_ADDR_LEN];
     uint16_t type;
-} __attribute__ ((packed));
+};
 
 struct ethernet_priv {
     struct netdev *dev;
@@ -23,11 +23,11 @@ struct ethernet_priv {
     int terminate;
 };
 
-const ethernet_addr_t ETHERNET_ADDR_ANY = {"\x00\x00\x00\x00\x00\x00"};
-const ethernet_addr_t ETHERNET_ADDR_BROADCAST = {"\xff\xff\xff\xff\xff\xff"};
+const uint8_t ETHERNET_ADDR_ANY[ETHERNET_ADDR_LEN] = {"\x00\x00\x00\x00\x00\x00"};
+const uint8_t ETHERNET_ADDR_BROADCAST[ETHERNET_ADDR_LEN] = {"\xff\xff\xff\xff\xff\xff"};
 
 int
-ethernet_addr_pton (const char *p, ethernet_addr_t *n) {
+ethernet_addr_pton (const char *p, uint8_t *n) {
     int index;
     char *ep;
     long val;
@@ -40,7 +40,7 @@ ethernet_addr_pton (const char *p, ethernet_addr_t *n) {
         if (ep == p || val < 0 || val > 0xff || (index < ETHERNET_ADDR_LEN - 1 && *ep != ':')) {
             break;
         }
-        n->addr[index] = (uint8_t)val;
+        n[index] = (uint8_t)val;
         p = ep + 1;
     }
     if (index != ETHERNET_ADDR_LEN || *ep != '\0') {
@@ -61,24 +61,23 @@ ethernet_type_ntoa (uint16_t type) {
 }
 
 char *
-ethernet_addr_ntop (const ethernet_addr_t *n, char *p, size_t size) {
-    if (!n || !p || size < ETHERNET_ADDR_STR_LEN + 1) {
+ethernet_addr_ntop (const uint8_t *n, char *p, size_t size) {
+    if (!n || !p) {
         return NULL;
     }
-    snprintf(p, size, "%02x:%02x:%02x:%02x:%02x:%02x",
-        n->addr[0], n->addr[1], n->addr[2], n->addr[3], n->addr[4], n->addr[5]);
+    snprintf(p, size, "%02x:%02x:%02x:%02x:%02x:%02x", n[0], n[1], n[2], n[3], n[4], n[5]);
     return p;
 }
 
 void
 ethernet_dump (struct netdev *dev, uint8_t *frame, size_t flen) {
     struct ethernet_hdr *hdr;
-    char addr[ETHERNET_ADDR_STR_LEN + 1];
+    char addr[ETHERNET_ADDR_STR_LEN];
 
     hdr = (struct ethernet_hdr *)frame;
-    fprintf(stderr, "  dev: %s (%s)\n", dev->name, ethernet_addr_ntop((ethernet_addr_t *)dev->addr, addr, sizeof(addr)));
-    fprintf(stderr, "  src: %s\n", ethernet_addr_ntop(&hdr->src, addr, sizeof(addr)));
-    fprintf(stderr, "  dst: %s\n", ethernet_addr_ntop(&hdr->dst, addr, sizeof(addr)));
+    fprintf(stderr, "  dev: %s (%s)\n", dev->name, ethernet_addr_ntop(dev->addr, addr, sizeof(addr)));
+    fprintf(stderr, "  src: %s\n", ethernet_addr_ntop(hdr->src, addr, sizeof(addr)));
+    fprintf(stderr, "  dst: %s\n", ethernet_addr_ntop(hdr->dst, addr, sizeof(addr)));
     fprintf(stderr, " type: 0x%04x (%s)\n", ntoh16(hdr->type), ethernet_type_ntoa(hdr->type));
     fprintf(stderr, "  len: %zu octets\n", flen);
     hexdump(stderr, frame, flen);
@@ -108,10 +107,10 @@ ethernet_open (struct netdev *dev, int opt) {
     priv->terminate = 0;
     priv->dev = dev;
     dev->priv = priv;
-    if (memcmp(dev->addr, &ETHERNET_ADDR_ANY, ETHERNET_ADDR_LEN) == 0) {
+    if (memcmp(dev->addr, ETHERNET_ADDR_ANY, ETHERNET_ADDR_LEN) == 0) {
         raw->ops->addr(raw, dev->addr, ETHERNET_ADDR_LEN);
     }
-    memcpy(dev->broadcast, &ETHERNET_ADDR_BROADCAST, ETHERNET_ADDR_LEN);
+    memcpy(dev->broadcast, ETHERNET_ADDR_BROADCAST, ETHERNET_ADDR_LEN);
     return 0;
 }
 
@@ -146,8 +145,8 @@ ethernet_rx (uint8_t *frame, size_t flen, void *arg) {
         return;
     }
     hdr = (struct ethernet_hdr *)frame;
-    if (memcmp(dev->addr, &hdr->dst, sizeof(ethernet_addr_t)) != 0) {
-        if (memcmp(&ETHERNET_ADDR_BROADCAST, &hdr->dst, sizeof(ethernet_addr_t)) != 0) {
+    if (memcmp(dev->addr, hdr->dst, ETHERNET_ADDR_LEN) != 0) {
+        if (memcmp(ETHERNET_ADDR_BROADCAST, hdr->dst, ETHERNET_ADDR_LEN) != 0) {
             return;
         }
     }
@@ -212,8 +211,8 @@ ethernet_tx (struct netdev *dev, uint16_t type, const uint8_t *payload, size_t p
     }
     memset(frame, 0, sizeof(frame));
     hdr = (struct ethernet_hdr *)frame;
-    memcpy(&hdr->dst, (caddr_t)dst, ETHERNET_ADDR_LEN);
-    memcpy(&hdr->src, dev->addr, ETHERNET_ADDR_LEN);
+    memcpy(hdr->dst, dst, ETHERNET_ADDR_LEN);
+    memcpy(hdr->src, dev->addr, ETHERNET_ADDR_LEN);
     hdr->type = hton16(type);
     memcpy(hdr + 1, payload, plen);
     flen = sizeof(struct ethernet_hdr) + (plen < ETHERNET_PAYLOAD_SIZE_MIN ? ETHERNET_PAYLOAD_SIZE_MIN : plen);

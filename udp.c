@@ -376,7 +376,7 @@ main (int argc, char *argv[]) {
     uint8_t buf[65535];
     ip_addr_t peer_addr;
     uint16_t peer_port;
-    char addr[IP_ADDR_STR_LEN + 1];
+    char addr[IP_ADDR_STR_LEN];
 
     if (init() == -1) {
         fprintf(stderr, "protocol stack initialize error.\n");

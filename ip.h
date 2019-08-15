@@ -19,7 +19,7 @@
 #define IP_DATA_SIZE_MAX 65535
 
 #define IP_ADDR_LEN 4
-#define IP_ADDR_STR_LEN 15
+#define IP_ADDR_STR_LEN 16 /* "ddd.ddd.ddd.ddd\0" */
 
 typedef uint32_t ip_addr_t;
 

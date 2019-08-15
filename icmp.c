@@ -33,7 +33,7 @@ struct icmp_hdr {
 void
 icmp_dump (struct netif *netif, ip_addr_t *src, ip_addr_t *dst, uint8_t *packet, size_t plen) {
     struct netif_ip *iface;
-    char addr[IP_ADDR_STR_LEN+1];
+    char addr[IP_ADDR_STR_LEN];
     struct icmp_hdr *hdr;
 
     iface = (struct netif_ip *)netif;

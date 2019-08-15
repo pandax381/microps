@@ -94,7 +94,7 @@ init (int argc, char *argv[]) {
     }
     strncpy(dev->name, ifname, sizeof(dev->name) -1);
     if (hwaddr) {
-        ethernet_addr_pton(hwaddr, (ethernet_addr_t *)dev->addr);
+        ethernet_addr_pton(hwaddr, dev->addr);
     }
     if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         fprintf(stderr, "dev->ops->open(): error\n");
@@ -127,7 +127,7 @@ main (int argc, char *argv[]) {
     ssize_t len;
     ip_addr_t peer_addr;
     uint16_t peer_port;
-    char addr[IP_ADDR_STR_LEN+1];
+    char addr[IP_ADDR_STR_LEN];
 
     if (init(argc, argv) == -1) {
         goto ERROR;

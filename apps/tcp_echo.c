@@ -94,7 +94,7 @@ init (int argc, char *argv[]) {
     }
     strncpy(dev->name, ifname, sizeof(dev->name) -1);
     if (hwaddr) {
-        ethernet_addr_pton(hwaddr, (ethernet_addr_t *)dev->addr);
+        ethernet_addr_pton(hwaddr, dev->addr);
     }
     if (dev->ops->open(dev, RAWDEV_TYPE_AUTO) == -1) {
         fprintf(stderr, "dev->ops->open(): error\n");

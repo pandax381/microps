@@ -89,7 +89,7 @@ ip_addr_ntop (const ip_addr_t *n, char *p, size_t size) {
 void
 ip_dump (struct netif *netif, uint8_t *packet, size_t plen) {
     struct netif_ip *iface;
-    char addr[IP_ADDR_STR_LEN+1];
+    char addr[IP_ADDR_STR_LEN];
 
     iface = (struct netif_ip *)netif;
     fprintf(stderr, " dev; %s (%s)\n", netif->dev->name, ip_addr_ntop(&iface->unicast, addr, sizeof(addr)));

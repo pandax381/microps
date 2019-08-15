@@ -8,7 +8,7 @@
 #include "net.h"
 
 #define ETHERNET_ADDR_LEN 6
-#define ETHERNET_ADDR_STR_LEN 17
+#define ETHERNET_ADDR_STR_LEN 18 /* "xx:xx:xx:xx:xx:xx\0" */
 
 #define ETHERNET_HDR_SIZE 14
 #define ETHERNET_TRL_SIZE 4
@@ -21,17 +21,13 @@
 #define ETHERNET_TYPE_ARP 0x0806
 #define ETHERNET_TYPE_LOOPBACK 0x9000
 
-typedef struct {
-    uint8_t addr[ETHERNET_ADDR_LEN];
-} __attribute__ ((packed)) ethernet_addr_t;
-
-extern const ethernet_addr_t ETHERNET_ADDR_ANY;
-extern const ethernet_addr_t ETHERNET_ADDR_BROADCAST;
+extern const uint8_t ETHERNET_ADDR_ANY[ETHERNET_ADDR_LEN];
+extern const uint8_t ETHERNET_ADDR_BROADCAST[ETHERNET_ADDR_LEN];
 
 extern int
-ethernet_addr_pton (const char *p, ethernet_addr_t *n);
+ethernet_addr_pton (const char *p, uint8_t *n);
 extern char *
-ethernet_addr_ntop (const ethernet_addr_t *n, char *p, size_t size);
+ethernet_addr_ntop (const uint8_t *n, char *p, size_t size);
 
 extern int
 ethernet_init (void);
