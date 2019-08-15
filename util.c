@@ -4,7 +4,6 @@
 #include <errno.h>
 #include <limits.h>
 #include <ctype.h>
-#include <arpa/inet.h>
 #include "util.h"
 
 void
@@ -129,24 +128,62 @@ queue_pop (struct queue_head *queue) {
     return entry;
 }
 
+#ifndef __BIG_ENDIAN
+#define __BIG_ENDIAN 4321
+#endif
+#ifndef __LITTLE_ENDIAN
+#define __LITTLE_ENDIAN 1234
+#endif
+
+static int endian;
+
+int
+byteorder (void) {
+    uint32_t x = 0x00000001;
+
+    return *(uint8_t *)&x ? __LITTLE_ENDIAN : __BIG_ENDIAN;
+}
+
+uint16_t
+byteswap16 (uint16_t v) {
+    return (v & 0x00ff) << 8 | (v & 0xff00 ) >> 8;
+}
+
+uint32_t
+byteswap32 (uint32_t v) {
+    return (v & 0x000000ff) << 24 | (v & 0x0000ff00) << 8 | (v & 0x00ff0000) >> 8 | (v & 0xff000000) >> 24;
+}
+
 uint16_t
 hton16 (uint16_t h) {
-    return htons(h);
+    if (!endian) {
+        endian = byteorder();
+    }
+    return endian == __LITTLE_ENDIAN ? byteswap16(h) : h;
 }
 
 uint16_t
 ntoh16 (uint16_t n) {
-    return ntohs(n);
+    if (!endian) {
+        endian = byteorder();
+    }
+    return endian == __LITTLE_ENDIAN ? byteswap16(n) : n;
 }
 
 uint32_t
 hton32 (uint32_t h) {
-    return htonl(h);
+    if (!endian) {
+        endian = byteorder();
+    }
+    return endian == __LITTLE_ENDIAN ? byteswap32(h) : h;
 }
 
 uint32_t
 ntoh32 (uint32_t n) {
-    return ntohl(n);
+    if (!endian) {
+        endian = byteorder();
+    }
+    return endian == __LITTLE_ENDIAN ? byteswap32(n) : n;
 }
 
 void
