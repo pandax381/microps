@@ -25,7 +25,7 @@ CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 ifeq ($(shell uname),Linux)
 	OBJS := $(OBJS) raw/soc.o raw/tap.o
 	TEST := $(TEST) test/raw_soc_test test/raw_tap_test
-	CFLAGS := $(CFLAGS) -lpthread -pthread -DHAVE_TAP
+	CFLAGS := $(CFLAGS) -pthread -DHAVE_PF_PACKET -DHAVE_TAP
 endif
 
 ifeq ($(shell uname),Darwin)

@@ -4,16 +4,18 @@
 #include <stdint.h>
 #include "raw.h"
 
+#ifdef HAVE_TAP
 #include "raw/tap.h"
 extern struct rawdev_ops tap_dev_ops;
+#endif
 
-#ifdef __linux__
+#ifdef HAVE_PF_PACKET
 #include "raw/soc.h"
 #define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_SOCKET
 extern struct rawdev_ops soc_dev_ops;
 #endif
 
-#ifdef __APPLE__
+#ifdef HAVE_BPF
 #include "raw/bpf.h"
 #define RAWDEV_TYPE_DEFAULT RAWDEV_TYPE_BPF
 extern struct rawdev_ops bpf_dev_ops;
@@ -36,20 +38,23 @@ rawdev_alloc (uint8_t type, char *name) {
         type = rawdev_detect_type(name);
     }    
     switch (type) {
+#ifdef HAVE_TAP
     case RAWDEV_TYPE_TAP:
         ops = &tap_dev_ops;
         break;
-#ifdef __linux__
+#endif
+#ifdef HAVE_PF_PACKET
     case RAWDEV_TYPE_SOCKET:
         ops = &soc_dev_ops;
         break;
 #endif
-#ifdef __APPLE__
+#ifdef HAVE_BPF
     case RAWDEV_TYPE_BPF:
         ops = &bpf_dev_ops;
         break;
 #endif
     default:
+        fprintf(stderr, "unsupported raw device type (%u)\n", type);
         return NULL;
     }
     raw = malloc(sizeof(struct rawdev));
