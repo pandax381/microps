@@ -100,19 +100,10 @@ struct {
     } cb;
 } tcp;
 
-#define TCP_CB_TABLE_FOREACH(x) \
-    for (x = tcp.cb.table; x != tcp.cb.table + TCP_CB_TABLE_SIZE; x++)
-#define TCP_CB_TABLE_OFFSET(x) \
-    (((caddr_t)x - (caddr_t)tcp.cb.table) / sizeof(*x))
-#define TCP_CB_STATE_RX_ISREADY(x) \
-    (x->state == TCP_CB_STATE_ESTABLISHED || \
-    x->state == TCP_CB_STATE_FIN_WAIT1 || \
-    x->state == TCP_CB_STATE_FIN_WAIT2)
-#define TCP_CB_STATE_TX_ISREADY(x) \
-    (x->state == TCP_CB_STATE_ESTABLISHED || \
-    x->state == TCP_CB_STATE_CLOSE_WAIT)
-#define TCP_SOCKET_ISINVALID(x) \
-    (x < 0 || x >= TCP_CB_TABLE_SIZE)
+#define TCP_CB_STATE_RX_ISREADY(x) (x->state == TCP_CB_STATE_ESTABLISHED || x->state == TCP_CB_STATE_FIN_WAIT1 || x->state == TCP_CB_STATE_FIN_WAIT2)
+#define TCP_CB_STATE_TX_ISREADY(x) (x->state == TCP_CB_STATE_ESTABLISHED || x->state == TCP_CB_STATE_CLOSE_WAIT)
+
+#define TCP_SOCKET_ISINVALID(x) (x < 0 || x >= TCP_CB_TABLE_SIZE)
 
 static int
 tcp_txq_add (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
@@ -182,7 +173,7 @@ tcp_timer_thread (void *arg) {
     while (1) {
         gettimeofday(&timestamp, NULL);
         pthread_mutex_lock(&tcp.cb.mutex);
-        TCP_CB_TABLE_FOREACH (cb) {
+        for (cb = tcp.cb.table; cb < array_tailof(tcp.cb.table); cb++) {
             if (cb->snd.una == cb->snd.nxt) {
                 continue;
             }
@@ -420,7 +411,7 @@ tcp_rx (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct net
         return;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
-    TCP_CB_TABLE_FOREACH (cb) {
+    for (cb = tcp.cb.table; cb < array_tailof(tcp.cb.table); cb++) {
         if (!cb->used) {
             if (!fcb) {
                 fcb = cb;
@@ -435,7 +426,7 @@ tcp_rx (uint8_t *segment, size_t len, ip_addr_t *src, ip_addr_t *dst, struct net
             }
         }
     }
-    if (TCP_CB_TABLE_OFFSET(cb) == TCP_CB_TABLE_SIZE) {
+    if (cb == array_tailof(tcp.cb.table)) {
         if (!lcb || !fcb || !TCP_FLG_IS(hdr->flg, TCP_FLG_SYN)) {
             // send RST
             pthread_mutex_unlock(&tcp.cb.mutex);
@@ -461,11 +452,11 @@ tcp_api_open (void) {
     struct tcp_cb *cb;
 
     pthread_mutex_lock(&tcp.cb.mutex);
-    TCP_CB_TABLE_FOREACH (cb) {
+    for (cb = tcp.cb.table; cb < array_tailof(tcp.cb.table); cb++) {
         if (!cb->used) {
             cb->used = 1;
             pthread_mutex_unlock(&tcp.cb.mutex);
-            return TCP_CB_TABLE_OFFSET(cb);
+            return array_offset(tcp.cb.table, cb);
         }
     }
     pthread_mutex_unlock(&tcp.cb.mutex);
@@ -526,12 +517,12 @@ tcp_api_connect (int soc, ip_addr_t *addr, uint16_t port) {
     if (!cb->port) {
         int offset = time(NULL) % 1024;
         for (p = TCP_SOURCE_PORT_MIN + offset; p <= TCP_SOURCE_PORT_MAX; p++) {
-            TCP_CB_TABLE_FOREACH (tmp) {
+            for (tmp = tcp.cb.table; tmp < array_tailof(tcp.cb.table); tmp++) {
                 if (tmp->used && tmp->port == hton16((uint16_t)p)) {
                     break;
                 }
             }
-            if (TCP_CB_TABLE_OFFSET(tmp) == TCP_CB_TABLE_SIZE) {
+            if (tmp == array_tailof(tcp.cb.table)) {
                 cb->port = hton16((uint16_t)p);
                 break;
             }
@@ -563,7 +554,7 @@ tcp_api_bind (int soc, uint16_t port) {
         return -1;
     }
     pthread_mutex_lock(&tcp.cb.mutex);
-    TCP_CB_TABLE_FOREACH (cb) {
+    for (cb = tcp.cb.table; cb < array_tailof(tcp.cb.table); cb++) {
         if (cb->port == port) {
             pthread_mutex_unlock(&tcp.cb.mutex);
             return -1;
@@ -621,7 +612,7 @@ tcp_api_accept (int soc) {
     backlog = entry->data;
     free(entry);
     pthread_mutex_unlock(&tcp.cb.mutex);
-    return TCP_CB_TABLE_OFFSET(backlog);
+    return array_offset(tcp.cb.table, backlog);
 }
 
 ssize_t
@@ -680,7 +671,7 @@ int
 tcp_init (void) {
     struct tcp_cb *cb;
 
-    TCP_CB_TABLE_FOREACH (cb) {
+    for (cb = tcp.cb.table; cb < array_tailof(tcp.cb.table); cb++) {
         pthread_cond_init(&cb->cond, NULL);
     }
     pthread_mutex_init(&tcp.cb.mutex, NULL);

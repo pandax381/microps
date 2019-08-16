@@ -43,11 +43,6 @@ static struct {
     } cb;
 } udp;
 
-#define UDP_CB_TABLE_FOREACH(x) \
-    for (x = udp.cb.table; x != udp.cb.table + UDP_CB_TABLE_SIZE; x++)
-#define UDP_CB_TABLE_OFFSET(x) \
-    ((x - udp.cb.table) / sizeof(*x))
-
 static ssize_t
 udp_tx (struct netif *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     char packet[65536];
@@ -95,7 +90,7 @@ udp_rx (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *
         return;
     }
     pthread_mutex_lock(&udp.cb.mutex);
-    UDP_CB_TABLE_FOREACH (cb) {
+    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
         if (cb->used && (!cb->iface || cb->iface == iface) && cb->port == hdr->dport) {
             data = malloc(sizeof(struct udp_queue_hdr) + (len - sizeof(struct udp_hdr)));
             if (!data) {
@@ -122,11 +117,11 @@ udp_api_open (void) {
     struct udp_cb *cb;
 
     pthread_mutex_lock(&udp.cb.mutex);
-    UDP_CB_TABLE_FOREACH (cb) {
+    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
         if (!cb->used) {
             cb->used = 1;
             pthread_mutex_unlock(&udp.cb.mutex);
-            return UDP_CB_TABLE_OFFSET(cb);
+            return array_offset(udp.cb.table, cb);
         }
     }
     pthread_mutex_unlock(&udp.cb.mutex);
@@ -179,7 +174,7 @@ udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
             return -1;
         }
     }
-    UDP_CB_TABLE_FOREACH (tmp) {
+    for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
         if (tmp->used && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
             pthread_mutex_unlock(&udp.cb.mutex);
             return -1;
@@ -204,7 +199,7 @@ udp_api_bind_iface (int soc, struct netif *iface, uint16_t port) {
         pthread_mutex_unlock(&udp.cb.mutex);
         return -1;
     }
-    UDP_CB_TABLE_FOREACH (tmp) {
+    for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
         if (tmp->used && (!tmp->iface || tmp->iface == iface) && tmp->port == port) {
             pthread_mutex_unlock(&udp.cb.mutex);
             return -1;
@@ -289,12 +284,12 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     }
     if (!cb->port) {
         for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
-            UDP_CB_TABLE_FOREACH (tmp) {
+            for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
                 if (tmp->port == hton16((uint16_t)p) && (!tmp->iface || tmp->iface == iface)) {
                     break;
                 }
             }
-            if (UDP_CB_TABLE_OFFSET(tmp) == UDP_CB_TABLE_SIZE) {
+            if (tmp == array_tailof(udp.cb.table)) {
                 cb->port = hton16((uint16_t)p);
                 break;
             }
@@ -313,7 +308,7 @@ int
 udp_init (void) {
     struct udp_cb *cb;
 
-    UDP_CB_TABLE_FOREACH (cb) {
+    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
         pthread_cond_init(&cb->cond, NULL);
     }
     pthread_mutex_init(&udp.cb.mutex, NULL);

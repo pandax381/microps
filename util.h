@@ -14,6 +14,7 @@
 #endif
 #define sizeof_member(s, m) sizeof(((s *)NULL)->m)
 #define array_tailof(x) (x + (sizeof(x) / sizeof(*x)))
+#define array_offset(x, y) (((uintptr_t)y - (uintptr_t)x) / sizeof(*y))
 
 struct queue_entry {
     void *data;
