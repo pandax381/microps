@@ -25,7 +25,7 @@ struct arp_hdr {
     uint8_t hln;
     uint8_t pln;
     uint16_t op;
-} __attribute__ ((packed));
+};
 
 struct arp_ethernet {
     struct arp_hdr hdr;
