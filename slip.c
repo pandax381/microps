@@ -230,11 +230,20 @@ static struct netdev_ops slip_ops = {
     .close = slip_close,
     .run = slip_run,
     .stop = slip_stop,
-    .tx = slip_tx,
+    .tx = slip_tx
+};
+
+static struct netdev_def slip_def = {
+    .type = NETDEV_TYPE_SLIP,
+    .mtu = SLIP_MUT_DEFAULT,
+    .flags = NETDEV_FLAG_NOARP,
+    .hlen = 0,
+    .alen = 0,
+    .ops = &slip_ops
 };
 
 int
 slip_init (void) {
-    netdev_register_driver(NETDEV_TYPE_SLIP, SLIP_MUT_DEFAULT, NETDEV_FLAG_NOARP, 0, 0, &slip_ops);
+    netdev_driver_register(&slip_def);
     return 0;
 }

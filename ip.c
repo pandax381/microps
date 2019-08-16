@@ -622,6 +622,6 @@ ip_add_protocol (uint8_t type, void (*handler)(uint8_t *payload, size_t len, ip_
 
 int
 ip_init (void) {
-    netdev_register_protocol(ETHERNET_TYPE_IP, ip_rx);
+    netdev_proto_register(NETDEV_PROTO_IP, ip_rx);
     return 0;
 }

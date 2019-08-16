@@ -1,5 +1,5 @@
-#ifndef NETDEV_H
-#define NETDEV_H
+#ifndef NET_H
+#define NET_H
 
 #include <stdint.h>
 
@@ -14,6 +14,11 @@
 #define NETDEV_FLAG_PROMISC   (0x0020)
 #define NETDEV_FLAG_RUNNING   (0x0040)
 #define NETDEV_FLAG_UP        (0x0080)
+
+#include "ethernet.h"
+#define NETDEV_PROTO_IP       ETHERNET_TYPE_IP
+#define NETDEV_PROTO_ARP      ETHERNET_TYPE_ARP
+#define NETDEV_PROTO_IPV6     ETHERNET_TYPE_IPV6
 
 #define NETIF_FAMILY_IPV4     (0x02)
 #define NETIF_FAMILY_IPV6     (0x0a)
@@ -39,6 +44,15 @@ struct netdev_ops {
     ssize_t (*tx)(struct netdev *dev, uint16_t type, const uint8_t *packet, size_t size, const void *dst);
 };
 
+struct netdev_def {
+    uint16_t type;
+    uint16_t mtu;
+    uint16_t flags;
+    uint16_t hlen;
+    uint16_t alen;
+    struct netdev_ops *ops;
+};
+
 struct netdev {
     struct netdev *next;
     struct netif *ifs;
@@ -56,12 +70,13 @@ struct netdev {
     void *priv;
 };
 
+extern int
+netdev_driver_register (struct netdev_def *def);
+extern int
+netdev_proto_register (unsigned short type, void (*handler)(uint8_t *packet, size_t plen, struct netdev *dev));
+
 extern struct netdev *
 netdev_root (void);
-extern int
-netdev_register_driver (uint16_t type, uint16_t mtu, uint16_t flags, uint16_t hlen, uint16_t alen, struct netdev_ops *ops);
-extern int
-netdev_register_protocol (unsigned short type, void (*handler)(uint8_t *packet, size_t plen, struct netdev *dev));
 extern struct netdev *
 netdev_alloc (uint16_t type);
 extern int

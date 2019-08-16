@@ -53,9 +53,11 @@ static const char *
 ethernet_type_ntoa (uint16_t type) {
     switch (ntoh16(type)) {
     case ETHERNET_TYPE_IP:
-        return "IPv4";
+        return "IP";
     case ETHERNET_TYPE_ARP:
         return "ARP";
+    case ETHERNET_TYPE_IPV6:
+        return "IPv6";
     }
     return "UNKNOWN";
 }
@@ -228,12 +230,21 @@ struct netdev_ops ethernet_ops = {
     .close = ethernet_close,
     .run = ethernet_run,
     .stop = ethernet_stop,
-    .tx = ethernet_tx,
+    .tx = ethernet_tx
+};
+
+struct netdev_def ethernet_def = {
+    .type = NETDEV_TYPE_ETHERNET,
+    .mtu = ETHERNET_PAYLOAD_SIZE_MAX,
+    .flags = NETDEV_FLAG_BROADCAST,
+    .hlen = ETHERNET_HDR_SIZE,
+    .alen = ETHERNET_ADDR_LEN,
+    .ops = &ethernet_ops
 };
 
 int
 ethernet_init (void) {
-    if (netdev_register_driver(NETDEV_TYPE_ETHERNET, ETHERNET_PAYLOAD_SIZE_MAX, NETDEV_FLAG_BROADCAST, ETHERNET_HDR_SIZE, ETHERNET_ADDR_LEN, &ethernet_ops) == -1) {
+    if (netdev_driver_register(&ethernet_def) == -1) {
         return -1;
     }
     return 0;

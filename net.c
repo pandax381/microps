@@ -13,60 +13,70 @@ struct netdev_driver {
     struct netdev_ops *ops;
 };
 
-struct netdev_protocol {
-    struct netdev_protocol *next;
+struct netdev_proto {
+    struct netdev_proto *next;
     uint16_t type;
     void (*handler)(uint8_t *packet, size_t plen, struct netdev *dev);
 };
 
-static struct netdev *devices;
 static struct netdev_driver *drivers;
-static struct netdev_protocol *protocols;
+static struct netdev_proto *protos;
+static struct netdev *devices;
+
+int
+netdev_driver_register (struct netdev_def *def) {
+    struct netdev_driver *entry;
+
+    for (entry = drivers; entry; entry = entry->next) {
+        if (entry->type == def->type) {
+            return -1;
+        }
+    }
+    entry = malloc(sizeof(struct netdev_driver));
+    if (!entry) {
+        return -1;
+    }
+    entry->next = drivers;
+    entry->type = def->type;
+    entry->mtu = def->mtu;
+    entry->flags = def->flags;
+    entry->hlen = def->hlen;
+    entry->alen = def->alen;
+    entry->ops = def->ops;
+    drivers = entry;
+    return 0;
+}
+
+int
+netdev_proto_register (unsigned short type, void (*handler)(uint8_t *packet, size_t plen, struct netdev *dev)) {
+    struct netdev_proto *entry;
+
+    for (entry = protos; entry; entry = entry->next) {
+        if (entry->type == type) {
+            return -1;
+        }
+    }
+    entry = malloc(sizeof(struct netdev_proto));
+    if (!entry) {
+        return -1;
+    }
+    entry->next = protos;
+    entry->type = type;
+    entry->handler = handler;
+    protos = entry;
+    return 0;
+}
 
 struct netdev *
 netdev_root (void) {
     return devices;
 }
 
-int
-netdev_register_driver (uint16_t type, uint16_t mtu, uint16_t flags, uint16_t hlen, uint16_t alen, struct netdev_ops *ops) {
-    struct netdev_driver *new_entry;
-
-    new_entry = malloc(sizeof(struct netdev_driver));
-    if (!new_entry) {
-        return -1;
-    }
-    new_entry->next = drivers;
-    new_entry->type = type;
-    new_entry->mtu = mtu;
-    new_entry->flags = flags;
-    new_entry->hlen = hlen;
-    new_entry->alen = alen;
-    new_entry->ops = ops;
-    drivers = new_entry;
-    return 0;
-}
-
-int
-netdev_register_protocol (unsigned short type, void (*handler)(uint8_t *packet, size_t plen, struct netdev *dev)) {
-    struct netdev_protocol *new_entry;
-
-    new_entry = malloc(sizeof(struct netdev_protocol));
-    if (!new_entry) {
-        return -1;
-    }
-    new_entry->next = protocols;
-    new_entry->type = type;
-    new_entry->handler = handler;
-    protocols = new_entry;
-    return 0;
-}
-
 static void
 netdev_rx_handler (struct netdev *dev, uint16_t type, uint8_t *packet, size_t plen) {
-    struct netdev_protocol *entry;
+    struct netdev_proto *entry;
 
-    for (entry = protocols; entry; entry = entry->next) {
+    for (entry = protos; entry; entry = entry->next) {
         if (hton16(entry->type) == type) {
             entry->handler(packet, plen, dev);
             return;
@@ -76,15 +86,15 @@ netdev_rx_handler (struct netdev *dev, uint16_t type, uint8_t *packet, size_t pl
 
 struct netdev *
 netdev_alloc (uint16_t type) {
-    struct netdev_driver *entry;
+    struct netdev_driver *driver;
     struct netdev *dev;
 
-    for (entry = drivers; entry; entry = entry->next) {
-        if (entry->type == type) {
+    for (driver = drivers; driver; driver = driver->next) {
+        if (driver->type == type) {
             break;
         }
     }
-    if (!entry) {
+    if (!driver) {
         return NULL;
     }
     dev = malloc(sizeof(struct netdev));
@@ -93,13 +103,13 @@ netdev_alloc (uint16_t type) {
     }
     dev->next = devices;
     dev->ifs = NULL;
-    dev->type = entry->type;
-    dev->mtu = entry->mtu;
-    dev->flags = entry->flags;
-    dev->hlen = entry->hlen;
-    dev->alen = entry->alen;
+    dev->type = driver->type;
+    dev->mtu = driver->mtu;
+    dev->flags = driver->flags;
+    dev->hlen = driver->hlen;
+    dev->alen = driver->alen;
     dev->rx_handler = netdev_rx_handler;
-    dev->ops = entry->ops;
+    dev->ops = driver->ops;
     devices = dev;
     return dev;
 }

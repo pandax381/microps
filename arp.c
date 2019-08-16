@@ -331,6 +331,6 @@ arp_init (void) {
     for (entry = arp_table; entry < array_tailof(arp_table); entry++) {
         pthread_cond_init(&entry->cond, NULL);
     }
-    netdev_register_protocol(ETHERNET_TYPE_ARP, arp_rx);
+    netdev_proto_register(NETDEV_PROTO_ARP, arp_rx);
     return 0;
 }
