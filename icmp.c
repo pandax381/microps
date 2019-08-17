@@ -134,7 +134,7 @@ icmp_tx (struct netif *netif, uint8_t type, uint8_t code, uint32_t values, uint8
     hdr->sum = cksum16((uint16_t *)hdr, msg_len, 0);
 #ifdef DEBUG
     fprintf(stderr, ">>> icmp_tx <<<\n");
-    icmp_dump(netif, NULL, dst, message, len);
+    icmp_dump(netif, NULL, dst, (uint8_t *)hdr, msg_len);
 #endif
     return ip_tx(netif, IP_PROTOCOL_ICMP, (uint8_t *)hdr, msg_len, dst);
 }
