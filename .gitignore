@@ -4,6 +4,9 @@ apps/udp_echo
 apps/router
 
 # Test programs
+test/raw_tap_test
+test/raw_soc_test
+test/raw_bpf_test
 test/raw_test
 test/ethernet_test
 test/slip_test

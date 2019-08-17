@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <netpacket/packet.h>
@@ -80,11 +81,19 @@ soc_dev_rx (struct soc_dev *dev, void (*callback)(uint8_t *, size_t, void *), vo
     pfd.fd = dev->fd;
     pfd.events = POLLIN;
     ret = poll(&pfd, 1, timeout);
-    if (ret <= 0) {
+    switch (ret) {
+    case -1:
+        if (errno != EINTR) {
+            perror("poll");
+        }
+    case 0: /* timeout */
         return;
     }
     len = read(dev->fd, buf, sizeof(buf));
-    if (len <= 0) {
+    switch (len) {
+    case -1:
+        perror("read");
+    case 0: /* EOF */
         return;
     }
     callback(buf, len, arg);

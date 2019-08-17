@@ -59,6 +59,7 @@ rawdev_alloc (uint8_t type, char *name) {
     }
     raw = malloc(sizeof(struct rawdev));
     if (!raw) {
+        fprintf(stderr, "malloc: failure\n");
         return NULL;
     }
     raw->type = type;

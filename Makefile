@@ -23,7 +23,7 @@ OBJS = util.o \
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
-	OBJS := $(OBJS) raw/soc.o raw/tap.o
+	OBJS := $(OBJS) raw/soc.o raw/tap_linux.o
 	TEST := $(TEST) test/raw_soc_test test/raw_tap_test
 	CFLAGS := $(CFLAGS) -pthread -DHAVE_PF_PACKET -DHAVE_TAP
 endif
@@ -31,7 +31,7 @@ endif
 ifeq ($(shell uname),Darwin)
 	OBJS := $(OBJS) raw/bpf.o
 	TEST := $(TEST) test/raw_bpf_test.o
-#	OBJS := $(OBJS) raw/tap.o
+#	OBJS := $(OBJS) raw/tap_bsd.o
 #	TEST := $(TEST) test/raw_tap_test.o
 #	CFLAGS := $(CFLAGS) -DHAVE_TAP
 endif
