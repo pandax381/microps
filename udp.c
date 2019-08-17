@@ -36,12 +36,8 @@ struct udp_cb {
     pthread_cond_t cond;
 };
 
-static struct {
-    struct {
-        struct udp_cb table[UDP_CB_TABLE_SIZE];
-        pthread_mutex_t mutex;
-    } cb;
-} udp;
+static struct udp_cb cb_table[UDP_CB_TABLE_SIZE];
+static pthread_mutex_t mutex;
 
 static ssize_t
 udp_tx (struct netif *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
@@ -89,12 +85,12 @@ udp_rx (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *
         fprintf(stderr, "udp checksum error\n");
         return;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
+    pthread_mutex_lock(&mutex);
+    for (cb = cb_table; cb < array_tailof(cb_table); cb++) {
         if (cb->used && (!cb->iface || cb->iface == iface) && cb->port == hdr->dport) {
             data = malloc(sizeof(struct udp_queue_hdr) + (len - sizeof(struct udp_hdr)));
             if (!data) {
-                pthread_mutex_unlock(&udp.cb.mutex);
+                pthread_mutex_unlock(&mutex);
                 return;
             }
             queue_hdr = data;
@@ -104,11 +100,11 @@ udp_rx (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *
             memcpy(queue_hdr + 1, hdr + 1, len - sizeof(struct udp_hdr));
             queue_push(&cb->queue, data, sizeof(struct udp_queue_hdr) + (len - sizeof(struct udp_hdr)));
             pthread_cond_broadcast(&cb->cond);
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return;
         }
     }
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     // icmp_send_destination_unreachable();
 }
 
@@ -116,15 +112,15 @@ int
 udp_api_open (void) {
     struct udp_cb *cb;
 
-    pthread_mutex_lock(&udp.cb.mutex);
-    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
+    pthread_mutex_lock(&mutex);
+    for (cb = cb_table; cb < array_tailof(cb_table); cb++) {
         if (!cb->used) {
             cb->used = 1;
-            pthread_mutex_unlock(&udp.cb.mutex);
-            return array_offset(udp.cb.table, cb);
+            pthread_mutex_unlock(&mutex);
+            return array_offset(cb_table, cb);
         }
     }
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     return -1;
 }
 
@@ -136,10 +132,10 @@ udp_api_close (int soc) {
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    cb = &udp.cb.table[soc];
+    pthread_mutex_lock(&mutex);
+    cb = &cb_table[soc];
     if (!cb->used) {
-        pthread_mutex_unlock(&udp.cb.mutex);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     cb->used = 0;
@@ -149,7 +145,7 @@ udp_api_close (int soc) {
         free(entry);
     }
     cb->queue.next = cb->queue.tail = NULL;
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 
@@ -161,28 +157,28 @@ udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    cb = &udp.cb.table[soc];
+    pthread_mutex_lock(&mutex);
+    cb = &cb_table[soc];
     if (!cb->used) {
-        pthread_mutex_unlock(&udp.cb.mutex);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     if (addr && *addr) {
         iface = ip_netif_by_addr(addr);
         if (!iface) {
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return -1;
         }
     }
-    for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
+    for (tmp = cb_table; tmp < array_tailof(cb_table); tmp++) {
         if (tmp->used && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return -1;
         }
     }
     cb->iface = iface;
     cb->port = port;
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 
@@ -193,21 +189,21 @@ udp_api_bind_iface (int soc, struct netif *iface, uint16_t port) {
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    cb = &udp.cb.table[soc];
+    pthread_mutex_lock(&mutex);
+    cb = &cb_table[soc];
     if (!cb->used) {
-        pthread_mutex_unlock(&udp.cb.mutex);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
-    for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
+    for (tmp = cb_table; tmp < array_tailof(cb_table); tmp++) {
         if (tmp->used && (!tmp->iface || tmp->iface == iface) && tmp->port == port) {
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return -1;
         }
     }
     cb->iface = iface;
     cb->port = port;
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     return 0;
 }
 
@@ -224,10 +220,10 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    cb = &udp.cb.table[soc];
+    pthread_mutex_lock(&mutex);
+    cb = &cb_table[soc];
     if (!cb->used) {
-        pthread_mutex_unlock(&udp.cb.mutex);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     gettimeofday(&tv, NULL);
@@ -235,12 +231,12 @@ udp_api_recvfrom (int soc, uint8_t *buf, size_t size, ip_addr_t *peer, uint16_t 
         if (timeout != -1) {
             ts.tv_sec = tv.tv_sec + timeout;
             ts.tv_nsec = tv.tv_usec * 1000;
-            ret = pthread_cond_timedwait(&cb->cond, &udp.cb.mutex, &ts);
+            ret = pthread_cond_timedwait(&cb->cond, &mutex, &ts);
         } else {
-            ret = pthread_cond_wait(&cb->cond, &udp.cb.mutex);
+            ret = pthread_cond_wait(&cb->cond, &mutex);
         }
     }
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     if (ret == ETIMEDOUT) {
         return -1;
     }
@@ -268,39 +264,39 @@ udp_api_sendto (int soc, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t por
     if (soc < 0 || soc >= UDP_CB_TABLE_SIZE) {
         return -1;
     }
-    pthread_mutex_lock(&udp.cb.mutex);
-    cb = &udp.cb.table[soc];
+    pthread_mutex_lock(&mutex);
+    cb = &cb_table[soc];
     if (!cb->used) {
-        pthread_mutex_unlock(&udp.cb.mutex);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     iface = cb->iface;
     if (!iface) {
         iface = ip_netif_by_peer(peer);
         if (!iface) {
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return -1;
         }
     }
     if (!cb->port) {
         for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
-            for (tmp = udp.cb.table; tmp < array_tailof(udp.cb.table); tmp++) {
+            for (tmp = cb_table; tmp < array_tailof(cb_table); tmp++) {
                 if (tmp->port == hton16((uint16_t)p) && (!tmp->iface || tmp->iface == iface)) {
                     break;
                 }
             }
-            if (tmp == array_tailof(udp.cb.table)) {
+            if (tmp == array_tailof(cb_table)) {
                 cb->port = hton16((uint16_t)p);
                 break;
             }
         }
         if (!cb->port) {
-            pthread_mutex_unlock(&udp.cb.mutex);
+            pthread_mutex_unlock(&mutex);
             return -1;
         }
     }
     sport = cb->port;
-    pthread_mutex_unlock(&udp.cb.mutex);
+    pthread_mutex_unlock(&mutex);
     return udp_tx(iface, sport, buf, len, peer, port);
 }
 
@@ -308,10 +304,10 @@ int
 udp_init (void) {
     struct udp_cb *cb;
 
-    for (cb = udp.cb.table; cb < array_tailof(udp.cb.table); cb++) {
+    for (cb = cb_table; cb < array_tailof(cb_table); cb++) {
         pthread_cond_init(&cb->cond, NULL);
     }
-    pthread_mutex_init(&udp.cb.mutex, NULL);
+    pthread_mutex_init(&mutex, NULL);
     if (ip_add_protocol(IP_PROTOCOL_UDP, udp_rx) == -1) {
         return -1;
     }
