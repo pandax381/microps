@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "net.h"
+#include "ip.h"
 
 #define ICMP_TYPE_ECHOREPLY 0
 #define ICMP_TYPE_DEST_UNREACH 3
@@ -35,8 +36,10 @@
 #define ICMP_CODE_EXCEEDED_TTL 0
 #define ICMP_CODE_EXCEEDED_FRAGMENT 1
 
+#define ICMP_COPY_LEN(x) ((((x)->vhl & 0x0f) << 2) + 8)
+
 extern int
-icmp_error_tx (struct netif *iface, uint8_t type, uint8_t code, uint8_t *dgram, size_t dlen);
+icmp_tx (struct netif *iface, uint8_t type, uint8_t code, uint32_t values, uint8_t *data, size_t len, ip_addr_t *dst);
 extern int
 icmp_init (void);
 

@@ -409,12 +409,12 @@ ip_forward_process (uint8_t *dgram, size_t dlen, struct netif *netif) {
 
     hdr = (struct ip_hdr *)dgram;
     if (!(hdr->ttl - 1)) {
-        icmp_error_tx(netif, ICMP_TYPE_TIME_EXCEEDED, ICMP_CODE_EXCEEDED_TTL, dgram, dlen);
+        icmp_tx(netif, ICMP_TYPE_TIME_EXCEEDED, ICMP_CODE_EXCEEDED_TTL, 0, dgram, ICMP_COPY_LEN(hdr), &hdr->src);
         return -1;
     }
     route = ip_route_lookup(NULL, &hdr->dst);
     if (!route) {
-        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_NET_UNREACH, dgram, dlen);
+        icmp_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_NET_UNREACH, 0, dgram, ICMP_COPY_LEN(hdr), &hdr->src);
         return -1;
     }
     if (((struct netif_ip *)route->netif)->unicast == hdr->dst) {
@@ -423,7 +423,7 @@ ip_forward_process (uint8_t *dgram, size_t dlen, struct netif *netif) {
         return 0;
     }
     if ((ntoh16(hdr->offset) & 0x4000) && (ntoh16(hdr->len) > route->netif->dev->mtu)) {
-        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_FRAGMENT_NEEDED, dgram, dlen);
+        icmp_tx(netif, ICMP_TYPE_DEST_UNREACH, ICMP_CODE_FRAGMENT_NEEDED, 0, dgram, ICMP_COPY_LEN(hdr), &hdr->src);
         return -1;
     }
     hdr->ttl--;
@@ -432,7 +432,7 @@ ip_forward_process (uint8_t *dgram, size_t dlen, struct netif *netif) {
     ret = ip_tx_netdev(route->netif, dgram, dlen, route->nexthop ? &route->nexthop : &hdr->dst);
     if (ret == -1) {
         hdr->ttl++; hdr->sum = sum; /* Restore original IP Header */
-        icmp_error_tx(netif, ICMP_TYPE_DEST_UNREACH, route->nexthop ? ICMP_CODE_NET_UNREACH : ICMP_CODE_HOST_UNREACH, dgram, dlen);
+        icmp_tx(netif, ICMP_TYPE_DEST_UNREACH, route->nexthop ? ICMP_CODE_NET_UNREACH : ICMP_CODE_HOST_UNREACH, 0, dgram, ICMP_COPY_LEN(hdr), &hdr->src);
     }
     return ret;
 }
