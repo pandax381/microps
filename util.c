@@ -198,7 +198,7 @@ maskset (uint32_t *mask, size_t size, size_t offset, size_t len) {
     for (idx = so; idx < so + (len / 32); idx++) {
         mask[idx + 1] = 0xffffffff;
     }
-    len -= (32 * idx);
+    len -= (32 * (idx - so));
     if (len) {
         mask[idx + 1] |= (0xffffffff >> (32 - len));
     }
@@ -220,7 +220,7 @@ maskchk (uint32_t *mask, size_t size, size_t offset, size_t len) {
             return 0;
         }
     }
-    len -= (32 * idx);
+    len -= (32 * (idx - so));
     if (len) {
         if ((mask[idx + 1] & (0xffffffff >> (32 - len))) ^ (0xffffffff >> (32 - len))) {
             return 0;
