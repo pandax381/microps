@@ -168,35 +168,51 @@ static void *
 tcp_timer_thread (void *arg) {
     struct timeval timestamp;
     struct tcp_cb *cb;
-    struct tcp_txq_entry *txq, *prev;
+    struct tcp_txq_entry *txq, *prev, *tmp;
     ip_addr_t peer;
 
     while (1) {
         gettimeofday(&timestamp, NULL);
         pthread_mutex_lock(&mutex);
         for (cb = cb_table; cb < array_tailof(cb_table); cb++) {
-            if (cb->snd.una == cb->snd.nxt) {
-                continue;
-            }
             prev = NULL;
-            for (txq = cb->txq.head; txq; txq = txq->next) {
+            txq = cb->txq.head;
+            while (txq) {
                 if (txq->segment->seq >= hton32(cb->snd.una)) {
                     if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
                         peer = cb->peer.addr;
                         ip_tx(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
                         txq->timestamp = timestamp;
                     }
+
+                    // update previous tcp_txq_entry
+                    prev = txq;
+                    txq = txq->next;
                 } else {
+                    // remove tcp_txq_entry from list
+                    // do not change prev, just update txq by txq->next,
+                    // and free txq and txq->segment,
+                    // and update cb->txq.[head|tail] if needed
+
+                    // swap tail tcp_txq_entry
+                    if (!txq->next) {
+                        // txq is tail entry
+                        cb->txq.tail = prev;
+                    }
+                    // swap previous tcp_txq_entry
                     if (prev) {
                         prev->next = txq->next;
-                        if (!prev->next) {
-                            cb->txq.tail = prev;
-                        }
                     } else {
-                        cb->txq.head = cb->txq.tail = txq->next;
+                        cb->txq.head = txq->next;
                     }
+
+                    // free tcp_txq_entry
+                    tmp = txq->next;
+                    free(txq->segment);
+                    free(txq);
+                    // check next entry
+                    txq = tmp;
                 }
-                prev = txq;
             }
         }
         pthread_mutex_unlock(&mutex);
