@@ -118,11 +118,16 @@ tcp_txq_add (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
     txq->len = len;
     gettimeofday(&txq->timestamp, NULL);
     txq->next = NULL;
+
+    // set txq to next of tail entry
     if (cb->txq.head == NULL) {
-        cb->txq.head = cb->txq.tail = txq;
+        cb->txq.head = txq;
     } else {
         cb->txq.tail->next = txq;
     }
+    // update tail entry
+    cb->txq.tail = txq;
+
     return 0;
 }
 
