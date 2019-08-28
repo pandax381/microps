@@ -178,7 +178,7 @@ tcp_timer_thread (void *arg) {
             prev = NULL;
             txq = cb->txq.head;
             while (txq) {
-                if (txq->segment->seq >= hton32(cb->snd.una)) {
+                if (ntoh32(txq->segment->seq) >= cb->snd.una) {
                     if (timestamp.tv_sec - txq->timestamp.tv_sec > 3) {
                         peer = cb->peer.addr;
                         ip_tx(cb->iface, IP_PROTOCOL_TCP, (uint8_t *)txq->segment, txq->len, &peer);
