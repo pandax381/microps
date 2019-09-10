@@ -11,6 +11,7 @@ test/raw_test
 test/ethernet_test
 test/slip_test
 test/arp_test
+test/icmp_test
 
 # Object files
 *.o

@@ -39,6 +39,22 @@ struct udp_cb {
 static struct udp_cb cb_table[UDP_CB_TABLE_SIZE];
 static pthread_mutex_t mutex;
 
+void
+udp_dump (struct netif *netif, uint8_t *packet, size_t plen) {
+    struct netif_ip *iface;
+    struct udp_hdr *hdr;
+    char addr[IP_ADDR_STR_LEN];
+
+    iface = (struct netif_ip *)netif;
+    fprintf(stderr, "   dev: %s (%s)\n", netif->dev->name, ip_addr_ntop(&iface->unicast, addr, sizeof(addr)));
+    hdr = (struct udp_hdr *)packet;
+    fprintf(stderr, " sport: %u\n", ntoh16(hdr->sport));
+    fprintf(stderr, " dport: %u\n", ntoh16(hdr->dport));
+    fprintf(stderr, "   len: %u\n", ntoh16(hdr->len));
+    fprintf(stderr, "   sum: 0x%04x\n", ntoh16(hdr->len));
+    hexdump(stderr, packet, plen);
+}
+
 static ssize_t
 udp_tx (struct netif *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t *peer, uint16_t port) {
     char packet[65536];
@@ -60,6 +76,10 @@ udp_tx (struct netif *iface, uint16_t sport, uint8_t *buf, size_t len, ip_addr_t
     pseudo += hton16((uint16_t)IP_PROTOCOL_UDP);
     pseudo += hton16(sizeof(struct udp_hdr) + len);
     hdr->sum = cksum16((uint16_t *)hdr, sizeof(struct udp_hdr) + len, pseudo);
+#ifdef DEBUG
+    fprintf(stderr, ">>> udp_tx <<<\n");
+    udp_dump((struct netif *)iface, (uint8_t *)packet, sizeof(struct udp_hdr) + len);
+#endif
     return ip_tx(iface, IP_PROTOCOL_UDP, (uint8_t *)packet, sizeof(struct udp_hdr) + len, peer);
 }
 
@@ -85,6 +105,10 @@ udp_rx (uint8_t *buf, size_t len, ip_addr_t *src, ip_addr_t *dst, struct netif *
         fprintf(stderr, "udp checksum error\n");
         return;
     }
+#ifdef DEBUG
+    fprintf(stderr, ">>> udp_rx <<<\n");
+    udp_dump((struct netif *)iface, buf, len);
+#endif
     pthread_mutex_lock(&mutex);
     for (cb = cb_table; cb < array_tailof(cb_table); cb++) {
         if (cb->used && (!cb->iface || cb->iface == iface) && cb->port == hdr->dport) {
@@ -139,6 +163,7 @@ udp_api_close (int soc) {
         return -1;
     }
     cb->used = 0;
+    cb->iface = NULL;
     cb->port = 0;
     while ((entry = queue_pop(&cb->queue)) != NULL) {
         free(entry->data);
@@ -171,7 +196,7 @@ udp_api_bind (int soc, ip_addr_t *addr, uint16_t port) {
         }
     }
     for (tmp = cb_table; tmp < array_tailof(cb_table); tmp++) {
-        if (tmp->used && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
+        if (tmp->used && tmp != cb && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
             pthread_mutex_unlock(&mutex);
             return -1;
         }
@@ -196,7 +221,7 @@ udp_api_bind_iface (int soc, struct netif *iface, uint16_t port) {
         return -1;
     }
     for (tmp = cb_table; tmp < array_tailof(cb_table); tmp++) {
-        if (tmp->used && (!tmp->iface || tmp->iface == iface) && tmp->port == port) {
+        if (tmp->used && tmp != cb && (!iface || !tmp->iface || tmp->iface == iface) && tmp->port == port) {
             pthread_mutex_unlock(&mutex);
             return -1;
         }

@@ -90,9 +90,25 @@ void
 ip_dump (struct netif *netif, uint8_t *packet, size_t plen) {
     struct netif_ip *iface;
     char addr[IP_ADDR_STR_LEN];
+    struct ip_hdr *hdr;
+    uint8_t hl;
+    uint16_t offset;
 
     iface = (struct netif_ip *)netif;
-    fprintf(stderr, " dev; %s (%s)\n", netif->dev->name, ip_addr_ntop(&iface->unicast, addr, sizeof(addr)));
+    fprintf(stderr, " dev: %s (%s)\n", netif->dev->name, ip_addr_ntop(&iface->unicast, addr, sizeof(addr)));
+    hdr = (struct ip_hdr *)packet;
+    hl = hdr->vhl & 0x0f;
+    fprintf(stderr, "      vhl: %02x [v: %u, hl: %u (%u)]\n", hdr->vhl, (hdr->vhl & 0xf0) >> 4, hl, hl << 2);
+    fprintf(stderr, "      tos: %02x\n", hdr->tos);
+    fprintf(stderr, "      len: %u\n", ntoh16(hdr->len));
+    fprintf(stderr, "       id: %u\n", ntoh16(hdr->id));
+    offset = ntoh16(hdr->offset);
+    fprintf(stderr, "   offset: 0x%04x [flags=%x, offset=%u]\n", offset, (offset & 0xe0) >> 5, offset & 0x1f);
+    fprintf(stderr, "      ttl: %u\n", hdr->ttl);
+    fprintf(stderr, " protocol: %u\n", hdr->protocol);
+    fprintf(stderr, "      sum: 0x%04x\n", ntoh16(hdr->sum));
+    fprintf(stderr, "      src: %s\n", ip_addr_ntop(&hdr->src, addr, sizeof(addr)));
+    fprintf(stderr, "      dst: %s\n", ip_addr_ntop(&hdr->dst, addr, sizeof(addr)));
     hexdump(stderr, packet, plen);
 }
 
