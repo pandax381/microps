@@ -310,9 +310,10 @@ tcp_incoming_event (struct tcp_cb *cb, struct tcp_hdr *hdr, size_t len) {
                 cb->state = TCP_CB_STATE_ESTABLISHED;
                 queue_push(&cb->parent->backlog, cb, sizeof(*cb));
                 pthread_cond_signal(&cb->parent->cond);
+            } else {
+                tcp_tx(cb, ntoh32(hdr->ack), 0, TCP_FLG_RST, NULL, 0);
                 break;
             }
-            break;
         case TCP_CB_STATE_ESTABLISHED:
         case TCP_CB_STATE_FIN_WAIT1:
         case TCP_CB_STATE_FIN_WAIT2:
