@@ -1,7 +1,7 @@
 microps (MICRO tcp/ip Protocol Stack)
 =======
 
-Tiny TCP/IP protcol stack for lecture.
+Tiny TCP/IP protocol stack for lecture.
 
 ## Build
 
