@@ -63,9 +63,7 @@ You can select a Link-Level RAW device.
 + raw_tap
 + raw_bpf
 
-It can change with the `$RAW` variable in the Makefile.
-
-The default value: Linux is raw_socket and BSD is raw_bpf.
+It can change in the Makefile.
 
 ## License
 
