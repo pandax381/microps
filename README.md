@@ -1,7 +1,26 @@
-microps (MICRO tcp/ip Protocol Stack)
+microps
 =======
 
-Tiny TCP/IP protocol stack for lecture.
+Tiny TCP/IP protocol stack for lectures.
+
+## Features
+
+Supports multiple raw access methods.
+
++ TUN/TAP
++ PF_PACKET (Linux)
++ BPF (macOS)
+
+Supports multiple link protocols.
+
++ Ethernet
++ SLIP
+
+Other features.
+
++ Supports multiple interfaces
++ Supports IP forwarding
++ Automatic IP configuration by DHCP client
 
 ## Build
 
