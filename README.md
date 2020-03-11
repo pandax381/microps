@@ -5,6 +5,8 @@ Tiny TCP/IP protocol stack for lectures.
 
 If you love the Go language, [see here](https://github.com/pandax381/lectcp).
 
+Porting to xv6: https://github.com/pandax381/xv6-net
+
 ## Features
 
 Supports multiple raw access methods.
