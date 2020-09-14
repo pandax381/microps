@@ -7,7 +7,6 @@
 #include "util.h"
 #include "raw.h"
 #include "net.h"
-#include "arp.h"
 #include "ethernet.h"
 
 struct ethernet_hdr {
