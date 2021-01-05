@@ -2,7 +2,7 @@ APPS =
 
 TESTS = test/test.exe \
 
-DRIVERS = 
+DRIVERS = driver/null.o \
 
 OBJS = util.o \
        net.o \
