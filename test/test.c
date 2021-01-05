@@ -1,6 +1,12 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <signal.h>
 #include <unistd.h>
+
+#include "util.h"
+#include "net.h"
+
+#include "driver/null.h"
 
 #include "test.h"
 
@@ -17,6 +23,7 @@ int
 main(int argc, char *argv[])
 {
     int opt, noop = 0;
+    struct net_device *dev;
 
     /*
      * Parse command line parameters
@@ -42,17 +49,34 @@ main(int argc, char *argv[])
      * Setup protocol stack
      */
     signal(SIGINT, on_signal);
+    if (net_init() == -1) {
+        errorf("net_init() failure");
+        return -1;
+    }
+    dev = null_init();
+    if (!dev) {
+        errorf("null_init() failure");
+        return -1;
+    }
+    if (net_run() == -1) {
+        errorf("net_run() failure");
+        return -1;
+    }
     /*
      * Test Code
      */
     while (!terminate) {
         if (!noop) {
-            /* ... */
+            if (net_device_output(dev, 0x0800, test_data, sizeof(test_data), NULL) == -1) {
+                errorf("net_device_output() failure");
+                break;
+            }
         }
         sleep(1);
     }
     /*
      * Cleanup protocol stack
      */
+    net_shutdown();
     return 0;
 }
