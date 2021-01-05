@@ -3,6 +3,7 @@ APPS =
 TESTS = test/test.exe \
 
 DRIVERS = driver/null.o \
+          driver/loopback.o \
 
 OBJS = util.o \
        net.o \
