@@ -1,6 +1,6 @@
 APPS = 
 
-TESTS = 
+TESTS = test/test.exe \
 
 DRIVERS = 
 
@@ -28,7 +28,7 @@ all: $(APPS) $(TESTS)
 $(APPS): %.exe : %.o $(OBJS) $(DRIVERS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(TESTS): %.exe : %.o $(OBJS) $(DRIVERS)
+$(TESTS): %.exe : %.o $(OBJS) $(DRIVERS) test/test.h
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 .c.o:
