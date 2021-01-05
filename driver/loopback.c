@@ -11,7 +11,7 @@
 static int
 loopback_transmit(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst)
 {
-    debugf("dev=%s, type=0x%04x, len=%zu", dev->name, type, len);
+    debugf("dev=%s, type=%s(0x%04x), len=%zu", dev->name, net_protocol_name(type), type, len);
     debugdump(data, len);
     net_input_handler(type, data, len, dev);
     return 0;

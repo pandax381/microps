@@ -104,7 +104,7 @@ net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data, si
         errorf("too long, dev=%s, mtu=%u, len=%zu", dev->name, dev->mtu, len);
         return -1;
     }
-    debugf("dev=%s, type=0x%04x, len=%zu", dev->name, type, len);
+    debugf("dev=%s, type=%s(0x%04x), len=%zu", dev->name, net_protocol_name(type), type, len);
     debugdump(data, len);
     if (dev->ops->transmit(dev, type, data, len, dst) == -1) {
         errorf("device transmit failure, dev=%s, len=%zu", dev->name, len);
