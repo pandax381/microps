@@ -20,6 +20,13 @@ on_signal(int s)
     terminate = 1;
 }
 
+static void
+ip_dummy_handler(const uint8_t *data, size_t len, struct net_device *dev)
+{
+    debugf("dev=%s, len=%zu", dev->name, len);
+    debugdump(data, len);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -54,6 +61,10 @@ main(int argc, char *argv[])
         errorf("net_init() failure");
         return -1;
     }
+    if (net_protocol_register("IP", NET_PROTOCOL_TYPE_IP, ip_dummy_handler) == -1) {
+        errorf("net_protocol_register() failure");
+        return -1;
+    }
     dev = null_init();
     if (!dev) {
         errorf("null_init() failure");
@@ -73,7 +84,7 @@ main(int argc, char *argv[])
      */
     while (!terminate) {
         if (!noop) {
-            if (net_device_output(dev, 0x0800, test_data, sizeof(test_data), NULL) == -1) {
+            if (net_device_output(dev, NET_PROTOCOL_TYPE_IP, test_data, sizeof(test_data), NULL) == -1) {
                 errorf("net_device_output() failure");
                 break;
             }
