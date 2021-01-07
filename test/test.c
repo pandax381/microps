@@ -5,6 +5,7 @@
 
 #include "util.h"
 #include "net.h"
+#include "ip.h"
 
 #include "driver/null.h"
 #include "driver/loopback.h"
@@ -25,6 +26,7 @@ main(int argc, char *argv[])
 {
     int opt, noop = 0;
     struct net_device *dev;
+    struct ip_iface *iface;
 
     /*
      * Parse command line parameters
@@ -62,6 +64,15 @@ main(int argc, char *argv[])
     dev = loopback_init();
     if (!dev) {
         errorf("loopback_init() failure");
+        return -1;
+    }
+    iface = ip_iface_alloc(LOOPBACK_IP_ADDR, LOOPBACK_NETMASK);
+    if (!iface) {
+        errorf("ip_iface_alloc() failure");
+        return -1;
+    }
+    if (ip_iface_register(dev, iface) == -1) {
+        errorf("ip_iface_register() failure");
         return -1;
     }
     if (net_run() == -1) {
