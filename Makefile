@@ -7,6 +7,7 @@ DRIVERS = driver/null.o \
 
 OBJS = util.o \
        net.o \
+       ip.o \
 
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
