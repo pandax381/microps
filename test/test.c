@@ -27,6 +27,8 @@ main(int argc, char *argv[])
     int opt, noop = 0;
     struct net_device *dev;
     struct ip_iface *iface;
+    ip_addr_t src = IP_ADDR_ANY, dst;
+    size_t offset = IP_HDR_SIZE_MIN;
 
     /*
      * Parse command line parameters
@@ -37,15 +39,32 @@ main(int argc, char *argv[])
             noop = 1;
             break;
         default:
-            fprintf(stderr, "Usage: %s [-n]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-n] [src] dst\n", argv[0]);
             return -1;
         }
     }
     switch (argc - optind) {
-    case 0:
+    case 2:
+        if (ip_addr_pton(argv[optind], &src) == -1) {
+            errorf("ip_addr_pton() failure, addr=%s", argv[optind]);
+            return -1;
+        }
+        optind++;
+        /* fall through */
+    case 1:
+        if (ip_addr_pton(argv[optind], &dst) == -1) {
+            errorf("ip_addr_pton() failure, addr=%s", argv[optind]);
+            return -1;
+        }
+        optind++;
         break;
+    case 0:
+        if (noop) {
+            break;
+        }
+        /* fall through */
     default:
-        fprintf(stderr, "Usage: %s [-n]\n", argv[0]);
+        fprintf(stderr, "Usage: %s [-n] [src] dst\n", argv[0]);
         return -1;
     }
     /*
@@ -84,8 +103,8 @@ main(int argc, char *argv[])
      */
     while (!terminate) {
         if (!noop) {
-            if (net_device_output(dev, NET_PROTOCOL_TYPE_IP, test_data, sizeof(test_data), NULL) == -1) {
-                errorf("net_device_output() failure");
+            if (ip_output(0x01, test_data + offset, sizeof(test_data) - offset, src, dst) == -1) {
+                errorf("ip_output() failure");
                 break;
             }
         }
