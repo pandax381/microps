@@ -8,6 +8,13 @@
 #include "net.h"
 #include "ip.h"
 
+struct ip_protocol {
+    struct ip_protocol *next;
+    char name[16];
+    uint8_t type;
+    void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface);
+};
+
 struct ip_hdr {
     uint8_t vhl;
     uint8_t tos;
@@ -27,6 +34,7 @@ const ip_addr_t IP_ADDR_BROADCAST = 0xffffffff; /* 255.255.255.255 */
 
 /* NOTE: if you want to add/delete the entries after net_run(), you need to protect these lists with a mutex. */
 static struct ip_iface *ifaces;
+static struct ip_protocol *protocols;
 
 int
 ip_addr_pton(const char *p, ip_addr_t *n)
@@ -84,7 +92,7 @@ ip_dump(const uint8_t *data, size_t len)
     offset = ntoh16(hdr->offset);
     fprintf(stderr, "     offset: 0x%04x [flags=%x, offset=%u]\n", offset, (offset & 0xe000) >> 13, offset & 0x1fff);
     fprintf(stderr, "        ttl: %u\n", hdr->ttl);
-    fprintf(stderr, "   protocol: %u\n", hdr->protocol);
+    fprintf(stderr, "   protocol: %u (%s)\n", hdr->protocol, ip_protocol_name(hdr->protocol));
     fprintf(stderr, "        sum: 0x%04x (0x%04x)\n", ntoh16(hdr->sum), ntoh16(cksum16((uint16_t *)data, hlen, -hdr->sum)));
     fprintf(stderr, "        src: %s\n", ip_addr_ntop(hdr->src, addr, sizeof(addr)));
     fprintf(stderr, "        dst: %s\n", ip_addr_ntop(hdr->dst, addr, sizeof(addr)));
@@ -162,6 +170,7 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     uint16_t hlen, total;
     struct ip_iface *iface;
     char addr[IP_ADDR_STR_LEN];
+    struct ip_protocol *proto;
 
     if (len < IP_HDR_SIZE_MIN) {
         errorf("too short");
@@ -202,9 +211,16 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
             return;
         }
     }
-    debugf("dev=%s, iface=%s, protocol=0x%02x, len=%u",
-        dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), hdr->protocol, total);
+    debugf("dev=%s, iface=%s, protocol=%s(0x%02x), len=%u",
+        dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), ip_protocol_name(hdr->protocol), hdr->protocol, total);
     ip_dump(data, total);
+    for (proto = protocols; proto; proto = proto->next) {
+        if (proto->type == hdr->protocol) {
+            proto->handler((uint8_t *)hdr + hlen, len - hlen, hdr->src, hdr->dst, iface);
+            return;
+        }
+    }
+    /* unsupported protocol */
 }
 
 static int
@@ -246,8 +262,8 @@ ip_output_core(struct ip_iface *iface, uint8_t protocol, const uint8_t *data, si
     hdr->dst = dst;
     hdr->sum = cksum16((uint16_t *)hdr, hlen, 0); /* don't convert bytoder */
     memcpy(hdr+1, data, len);
-    debugf("dev=%s, iface=%s, protocol=0x%02x, len=%u",
-        NET_IFACE(iface)->dev->name, ip_addr_ntop(dst, addr, sizeof(addr)), protocol, total);
+    debugf("dev=%s, iface=%s, protocol=%s(0x%02x), len=%u",
+        NET_IFACE(iface)->dev->name, ip_addr_ntop(dst, addr, sizeof(addr)), ip_protocol_name(protocol), protocol, total);
     ip_dump(buf, total);
     return ip_output_device(iface, buf, total, dst);
 }
@@ -297,6 +313,45 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
         return -1;
     }
     return len;
+}
+
+/* NOTE: must not be call after net_run() */
+int
+ip_protocol_register(const char *name, uint8_t type, void (*handler)(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface))
+{
+    struct ip_protocol *entry;
+
+    for (entry = protocols; entry; entry = entry->next) {
+        if (entry->type == type) {
+            errorf("already registerd, type=%s(0x%02x), exist=%s(0x%02x)", name, type, entry->name, entry->type);
+            return -1;
+        }
+    }
+    entry = calloc(1, sizeof(*entry));
+    if (!entry) {
+        errorf("calloc() failure");
+        return -1;
+    }
+    strncpy(entry->name, name, sizeof(entry->name)-1);
+    entry->type = type;
+    entry->handler = handler;
+    entry->next = protocols;
+    protocols = entry;
+    infof("registerd, type=%s(0x%02x)", entry->name, entry->type);
+    return 0;
+}
+
+char *
+ip_protocol_name(uint8_t type)
+{
+    struct ip_protocol *entry;
+
+    for (entry = protocols; entry; entry = entry->next) {
+        if (entry->type == type) {
+            return entry->name;
+        }
+    }
+    return "UNKNOWN";
 }
 
 int
