@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "net.h"
 
@@ -41,6 +42,9 @@ extern int
 ip_iface_register(struct net_device *dev, struct ip_iface *iface);
 extern struct ip_iface *
 ip_iface_select(ip_addr_t addr);
+
+extern ssize_t
+ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst);
 
 extern int
 ip_init(void);
