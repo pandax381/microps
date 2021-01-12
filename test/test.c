@@ -11,6 +11,7 @@
 
 #include "driver/null.h"
 #include "driver/loopback.h"
+#include "driver/ether_tap.h"
 
 #include "test.h"
 
@@ -89,6 +90,20 @@ main(int argc, char *argv[])
         return -1;
     }
     iface = ip_iface_alloc(LOOPBACK_IP_ADDR, LOOPBACK_NETMASK);
+    if (!iface) {
+        errorf("ip_iface_alloc() failure");
+        return -1;
+    }
+    if (ip_iface_register(dev, iface) == -1) {
+        errorf("ip_iface_register() failure");
+        return -1;
+    }
+    dev = ether_tap_init(ETHER_TAP_NAME, ETHER_TAP_HW_ADDR);
+    if (!dev) {
+        errorf("ether_tap_init() failure");
+        return -1;
+    }
+    iface = ip_iface_alloc(ETHER_TAP_IP_ADDR, ETHER_TAP_NETMASK);
     if (!iface) {
         errorf("ip_iface_alloc() failure");
         return -1;
