@@ -2,10 +2,12 @@
 #include <stdint.h>
 #include <signal.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 #include "util.h"
 #include "net.h"
 #include "ip.h"
+#include "icmp.h"
 
 #include "driver/null.h"
 #include "driver/loopback.h"
@@ -21,21 +23,6 @@ on_signal(int s)
     terminate = 1;
 }
 
-static void
-icmp_dummy_handler(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface)
-{
-    char addr1[IP_ADDR_STR_LEN];
-    char addr2[IP_ADDR_STR_LEN];
-    char addr3[IP_ADDR_STR_LEN];
-
-    debugf("iface=%s, src=%s, dst=%s, len=%zu",
-        ip_addr_ntop(iface->unicast, addr1, sizeof(addr1)),
-        ip_addr_ntop(src, addr2, sizeof(addr2)),
-        ip_addr_ntop(dst, addr3, sizeof(addr3)),
-        len);
-    debugdump(data, len);
-}
-
 int
 main(int argc, char *argv[])
 {
@@ -43,7 +30,8 @@ main(int argc, char *argv[])
     struct net_device *dev;
     struct ip_iface *iface;
     ip_addr_t src = IP_ADDR_ANY, dst;
-    size_t offset = IP_HDR_SIZE_MIN;
+    uint16_t id, seq = 0;
+    size_t offset = IP_HDR_SIZE_MIN + ICMP_HDR_SIZE;
 
     /*
      * Parse command line parameters
@@ -90,10 +78,6 @@ main(int argc, char *argv[])
         errorf("net_init() failure");
         return -1;
     }
-    if (ip_protocol_register("ICMP", IP_PROTOCOL_ICMP, icmp_dummy_handler) == -1) {
-        errorf("ip_protocol_register() failure");
-        return -1;
-    }
     dev = null_init();
     if (!dev) {
         errorf("null_init() failure");
@@ -120,10 +104,11 @@ main(int argc, char *argv[])
     /*
      * Test Code
      */
+    id = getpid() % UINT16_MAX;
     while (!terminate) {
         if (!noop) {
-            if (ip_output(IP_PROTOCOL_ICMP, test_data + offset, sizeof(test_data) - offset, src, dst) == -1) {
-                errorf("ip_output() failure");
+            if (icmp_output(ICMP_TYPE_ECHO, 0, hton32(id << 16 | ++seq), test_data + offset, sizeof(test_data) - offset, src, dst) == -1) {
+                errorf("icmp_output() failure");
                 break;
             }
         }
