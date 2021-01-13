@@ -177,6 +177,25 @@ arp_cache_delete(struct arp_cache *cache)
 }
 
 static int
+arp_request(struct net_iface *iface, ip_addr_t tpa)
+{
+    struct arp_ether request;
+
+    request.hdr.hrd = hton16(ARP_HRD_ETHER);
+    request.hdr.pro = hton16(ARP_PRO_IP);
+    request.hdr.hln = ETHER_ADDR_LEN;
+    request.hdr.pln = IP_ADDR_LEN;
+    request.hdr.op = hton16(ARP_OP_REQUEST);
+    memcpy(request.sha, iface->dev->addr, ETHER_ADDR_LEN);
+    memcpy(request.spa, &((struct ip_iface *)iface)->unicast, IP_ADDR_LEN);
+    memset(request.tha, 0, ETHER_ADDR_LEN);
+    memcpy(request.tpa, &tpa, IP_ADDR_LEN);
+    debugf("dev=%s, opcode=%s(0x%04x), len=%zu", iface->dev->name, arp_opcode_ntoa(request.hdr.op), ntoh16(request.hdr.op), sizeof(request));
+    arp_dump((uint8_t *)&request, sizeof(request));
+    return net_device_output(iface->dev, ETHER_TYPE_ARP, (uint8_t *)&request, sizeof(request), iface->dev->broadcast);
+}
+
+static int
 arp_reply(struct net_iface *iface, const uint8_t *tha, ip_addr_t tpa, const uint8_t *dst)
 {
     struct arp_ether reply;
@@ -257,8 +276,23 @@ arp_resolve(struct net_iface *iface, ip_addr_t pa, uint8_t *ha)
     pthread_mutex_lock(&mutex);
     cache = arp_cache_select(pa);
     if (!cache) {
+        cache = arp_cache_alloc();
+        if (!cache) {
+            pthread_mutex_unlock(&mutex);
+            errorf("arp_cache_alloc() failure");
+            return ARP_RESOLVE_ERROR;
+        }
+        cache->state = ARP_CACHE_STATE_INCOMPLETE;
+        cache->pa = pa;
+        gettimeofday(&cache->timestamp, NULL);
+        arp_request(iface, pa);
         pthread_mutex_unlock(&mutex);
         debugf("cache not found, pa=%s", ip_addr_ntop(pa, addr1, sizeof(addr1)));
+        return ARP_RESOLVE_INCOMPLETE;
+    }
+    if (cache->state == ARP_CACHE_STATE_INCOMPLETE) {
+        arp_request(iface, pa); /* just in case packet loss */
+        pthread_mutex_unlock(&mutex);
         return ARP_RESOLVE_INCOMPLETE;
     }
     memcpy(ha, cache->ha, ETHER_ADDR_LEN);
