@@ -8,6 +8,7 @@ DRIVERS = driver/null.o \
 OBJS = util.o \
        net.o \
        ether.o \
+       arp.o \
        ip.o \
        icmp.o \
 
