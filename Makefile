@@ -1,8 +1,10 @@
 APPS = 
 
 TEST = test/step1.exe \
+       test/step2.exe \
 
 DRIVERS = driver/null.o \
+          driver/loopback.o \
 
 OBJS = util.o \
        net.o \
