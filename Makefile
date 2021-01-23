@@ -2,7 +2,7 @@ APPS =
 
 TEST = 
 
-DRIVERS = 
+DRIVERS = driver/null.o \
 
 OBJS = util.o \
        net.o \
