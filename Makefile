@@ -5,6 +5,7 @@ TEST =
 DRIVERS = 
 
 OBJS = util.o \
+       net.o \
 
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
