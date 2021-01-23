@@ -1,0 +1,36 @@
+#ifndef IP_H
+#define IP_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "net.h"
+
+#define IP_VERSION_IPV4 4
+
+#define IP_HDR_SIZE_MIN 20
+#define IP_HDR_SIZE_MAX 60
+
+#define IP_TOTAL_SIZE_MAX UINT16_MAX /* maximum value of uint16 */
+#define IP_PAYLOAD_SIZE_MAX (IP_TOTAL_SIZE_MAX - IP_HDR_SIZE_MIN)
+
+#define IP_ADDR_LEN 4
+#define IP_ADDR_STR_LEN 16 /* "ddd.ddd.ddd.ddd\0" */
+
+typedef uint32_t ip_addr_t;
+
+extern const ip_addr_t IP_ADDR_ANY;
+extern const ip_addr_t IP_ADDR_BROADCAST;
+
+extern int
+ip_addr_pton(const char *p, ip_addr_t *n);
+extern char *
+ip_addr_ntop(const ip_addr_t n, char *p, size_t size);
+
+extern ssize_t
+ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst);
+
+extern int
+ip_init(void);
+
+#endif

@@ -263,9 +263,14 @@ net_shutdown(void)
     debugf("shutdown");
 }
 
+#include "ip.h"
+
 int
 net_init(void)
 {
-    /* do nothing */
+    if (ip_init() == -1) {
+        errorf("ip_init() failure");
+        return -1;
+    }
     return 0;
 }

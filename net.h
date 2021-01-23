@@ -27,6 +27,9 @@
 #define NET_DEVICE_IS_UP(x) ((x)->flags & NET_DEVICE_FLAG_UP)
 #define NET_DEVICE_STATE(x) (NET_DEVICE_IS_UP(x) ? "up" : "down")
 
+#define NET_PROTOCOL_TYPE_IP   0x0800
+#define NET_PROTOCOL_TYPE_ARP  0x0806
+
 struct net_device; /* forward declaration */
 
 struct net_device_ops {
