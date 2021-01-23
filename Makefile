@@ -1,6 +1,6 @@
 APPS = 
 
-TEST = 
+TEST = test/step1.exe \
 
 DRIVERS = driver/null.o \
 
