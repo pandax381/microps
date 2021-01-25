@@ -24,7 +24,7 @@ on_signal(int s)
 {
     (void)s;
     terminate = 1;
-    close(0);
+    net_interrupt = 1;
 }
 
 static int
@@ -80,41 +80,33 @@ setup(void)
 int
 main(int argc, char *argv[])
 {
-    int opt, soc;
+    int soc;
     long int port;
     struct udp_endpoint local = {}, foreign;
     uint8_t buf[1024];
+    char ep[UDP_ENDPOINT_STR_LEN];
+    ssize_t ret;
 
     /*
      * Parse command line parameters
      */
-    while ((opt = getopt(argc, argv, "s:p:")) != -1) {
-        switch (opt) {
-        case 's':
-            if (ip_addr_pton(optarg, &local.addr) == -1) {
-                errorf("ip_addr_pton() failure, addr=%s", optarg);
-                return -1;
-            }
-            break;
-        case 'p':
-            port = strtol(optarg, NULL, 10);
-            if (port < 0 || port > UINT16_MAX) {
-                errorf("invalid port, port=%s", optarg);
-                return -1;
-            }
-            local.port = hton16(port);
-            break;
-        default:
-            fprintf(stderr, "Usage: %s [-s local_addr] [-p local_port] foreign_addr:port\n", argv[0]);
+    switch (argc) {
+    case 3:
+        if (ip_addr_pton(argv[argc-2], &local.addr) == -1) {
+            errorf("ip_addr_pton() failure, addr=%s", optarg);
             return -1;
         }
-    }
-    if (argc - optind != 1) {
-        fprintf(stderr, "Usage: %s [-s local_addr] [-p local_port] foreign_addr:port\n", argv[0]);
-        return -1;
-    }
-    if (udp_endpoint_pton(argv[optind], &foreign) == -1) {
-        errorf("udp_endpoint_pton() failure, ep=%s", argv[optind]);
+        /* fall through */
+    case 2:
+        port = strtol(argv[argc-1], NULL, 10);
+        if (port < 0 || port > UINT16_MAX) {
+            errorf("invalid port, port=%s", optarg);
+            return -1;
+        }
+        local.port = hton16(port);
+        break;
+    default:
+        fprintf(stderr, "Usage: %s [addr] port\n", argv[0]);
         return -1;
     }
     /*
@@ -125,24 +117,25 @@ main(int argc, char *argv[])
         return -1;
     }
     /*
-     * Application Code
+     *  Application Code
      */
     soc = udp_open();
     if (soc == -1) {
         errorf("udp_open() failure");
         return -1;
     }
-    if (local.port) {
-        if (udp_bind(soc, &local) == -1) {
-            errorf("udp_bind() failure");
-            return -1;
-        }
+    if (udp_bind(soc, &local) == -1) {
+        errorf("udp_bind() failure");
+        return -1;
     }
     while (!terminate) {
-        if (!fgets((char *)buf, sizeof(buf), stdin)) {
+        ret = udp_recvfrom(soc, buf, sizeof(buf), &foreign);
+        if (ret <= 0) {
             break;
         }
-        if (udp_sendto(soc, buf, strlen((char *)buf), &foreign) == -1) {
+        infof("%zu bytes data form %s", ret, udp_endpoint_ntop(&foreign, ep, sizeof(ep)));
+        hexdump(stderr, buf, ret);
+        if (udp_sendto(soc, buf, ret, &foreign) == -1) {
             errorf("udp_sendto() failure");
             break;
         }
