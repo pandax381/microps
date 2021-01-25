@@ -38,6 +38,8 @@ struct net_timer {
 static pthread_t thread;
 static volatile sig_atomic_t terminate;
 
+volatile sig_atomic_t net_interrupt;
+
 /* NOTE: if you want to add/delete the entries after net_run(), you need to protect these lists with a mutex. */
 static struct net_device *devices;
 static struct net_protocol *protocols;

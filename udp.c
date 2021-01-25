@@ -15,6 +15,10 @@
 #define UDP_PCB_STATE_OPEN    1
 #define UDP_PCB_STATE_CLOSING 2
 
+/* see https://tools.ietf.org/html/rfc6335 */
+#define UDP_SOURCE_PORT_MIN 49152
+#define UDP_SOURCE_PORT_MAX 65535
+
 struct pseudo_hdr {
     uint32_t src;
     uint32_t dst;
@@ -300,4 +304,149 @@ udp_init(void)
         return -1;
     }
     return 0;
+}
+
+/*
+ * UDP User Commands
+ */
+
+int
+udp_open(void)
+{
+    struct udp_pcb *pcb;
+    int id;
+
+    pthread_mutex_lock(&mutex);
+    pcb = udp_pcb_alloc();
+    if (!pcb) {
+        errorf("udp_pcb_alloc() failure");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    id = udp_pcb_id(pcb);
+    pthread_mutex_unlock(&mutex);
+    return id;
+}
+
+int
+udp_close(int id)
+{
+    struct udp_pcb *pcb;
+
+    pthread_mutex_lock(&mutex);
+    pcb = udp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found, id=%d", id);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    udp_pcb_release(pcb);
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}
+
+int
+udp_bind(int id, struct udp_endpoint *local)
+{
+    struct udp_pcb *pcb, *exist;
+    char ep1[UDP_ENDPOINT_STR_LEN];
+    char ep2[UDP_ENDPOINT_STR_LEN];
+
+    pthread_mutex_lock(&mutex);
+    pcb = udp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found, id=%d", id);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    exist = udp_pcb_select(local->addr, local->port);
+    if (exist) {
+        errorf("already in use, id=%d, want=%s, exist=%s",
+            id, udp_endpoint_ntop(local, ep1, sizeof(ep1)), udp_endpoint_ntop(&exist->local, ep2, sizeof(ep2)));
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pcb->local = *local;
+    debugf("bound, id=%d, local=%s", id, udp_endpoint_ntop(&pcb->local, ep1, sizeof(ep1)));
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}
+
+ssize_t
+udp_sendto(int id, uint8_t *data, size_t len, struct udp_endpoint *foreign)
+{
+    struct udp_pcb *pcb;
+    struct udp_endpoint local;
+    struct ip_iface *iface;
+    char addr[IP_ADDR_STR_LEN];
+    uint32_t p;
+
+    pthread_mutex_lock(&mutex);
+    pcb = udp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found, id=%d", id);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    local.addr = pcb->local.addr;
+    if (local.addr == IP_ADDR_ANY) {
+        iface = ip_route_get_iface(foreign->addr);
+        if (!iface) {
+            errorf("iface not found that can reach foreign address, addr=%s",
+                ip_addr_ntop(foreign->addr, addr, sizeof(addr)));
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+        local.addr = iface->unicast;
+        debugf("select local address, addr=%s", ip_addr_ntop(local.addr, addr, sizeof(addr)));
+    }
+    if (!pcb->local.port) {
+        for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
+            if (!udp_pcb_select(local.addr, hton16(p))) {
+                pcb->local.port = hton16(p);
+                debugf("dinamic assign local port, port=%d", p);
+                break;
+            }
+        }
+        if (!pcb->local.port) {
+            debugf("failed to dinamic assign local port, addr=%s", ip_addr_ntop(local.addr, addr, sizeof(addr)));
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+    }
+    local.port = pcb->local.port;
+    pthread_mutex_unlock(&mutex);
+    return udp_output(&local, foreign, data, len);
+}
+
+ssize_t
+udp_recvfrom(int id, uint8_t *buf, size_t size, struct udp_endpoint *foreign)
+{
+    struct udp_pcb *pcb;
+    struct udp_queue_entry *entry;
+    ssize_t len;
+
+    pthread_mutex_lock(&mutex);
+    pcb = udp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found, id=%d", id);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    entry = udp_pcb_queue_pop(pcb);
+    if (!entry) {
+        if (pcb->state == UDP_PCB_STATE_CLOSING) {
+            udp_pcb_release(pcb);
+        }
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pthread_mutex_unlock(&mutex);
+    if (foreign) {
+        *foreign = entry->foreign;
+    }
+    len = MIN(size, entry->len); /* truncate */
+    memcpy(buf, entry + 1, len);
+    free(entry);
+    return len;
 }

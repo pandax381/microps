@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <signal.h>
 
 #ifndef IFNAMSIZ
 #define IFNAMSIZ 16
@@ -68,6 +69,8 @@ struct net_device {
     struct net_device_ops *ops;
     void *priv;
 };
+
+extern volatile sig_atomic_t net_interrupt;
 
 extern struct net_device *
 net_device_alloc(void (*setup)(struct net_device *dev));
