@@ -1,4 +1,4 @@
-APPS = 
+APPS = app/udpc.exe \
 
 TESTS = test/test.exe \
 
