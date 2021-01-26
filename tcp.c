@@ -1,8 +1,13 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pthread.h>
 
 #include "util.h"
 #include "ip.h"
+
+#include "tcp.h"
 
 #define TCP_FLG_FIN 0x01
 #define TCP_FLG_SYN 0x02
@@ -13,6 +18,21 @@
 
 #define TCP_FLG_IS(x, y) ((x & 0x3f) == (y))
 #define TCP_FLG_ISSET(x, y) ((x & 0x3f) & (y) ? 1 : 0)
+
+#define TCP_PCB_SIZE 16
+
+#define TCP_PCB_STATE_FREE         0
+#define TCP_PCB_STATE_CLOSED       1
+#define TCP_PCB_STATE_LISTEN       2
+#define TCP_PCB_STATE_SYN_SENT     3
+#define TCP_PCB_STATE_SYN_RECEIVED 4
+#define TCP_PCB_STATE_ESTABLISHED  5
+#define TCP_PCB_STATE_FIN_WAIT1    6
+#define TCP_PCB_STATE_FIN_WAIT2    7
+#define TCP_PCB_STATE_CLOSING      8
+#define TCP_PCB_STATE_TIME_WAIT    9
+#define TCP_PCB_STATE_CLOSE_WAIT  10
+#define TCP_PCB_STATE_LAST_ACK    11
 
 struct pseudo_hdr {
     uint32_t src;
@@ -33,6 +53,69 @@ struct tcp_hdr {
     uint16_t sum;
     uint16_t up;
 };
+
+struct tcp_pcb {
+    int state;
+    struct tcp_endpoint local;
+    struct tcp_endpoint foreign;
+    struct {
+        uint32_t nxt;
+        uint32_t una;
+        uint16_t wnd;
+        uint16_t up;
+        uint32_t wl1;
+        uint32_t wl2;
+    } snd;
+    uint32_t iss;
+    struct {
+        uint32_t nxt;
+        uint16_t wnd;
+        uint16_t up;
+    } rcv;
+    uint32_t irs;
+    uint16_t mtu;
+    uint16_t mss;
+    uint8_t buf[65535]; /* receive buffer */
+    pthread_cond_t cond;
+    int wait; /* number of wait for cond */
+};
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct tcp_pcb pcbs[TCP_PCB_SIZE];
+
+int
+tcp_endpoint_pton(char *p, struct tcp_endpoint *n)
+{
+    char *sep;
+    char addr[IP_ADDR_STR_LEN] = {};
+    long int port;
+
+    sep = strrchr(p, ':');
+    if (!sep) {
+        return -1;
+    }
+    memcpy(addr, p, sep - p);
+    if (ip_addr_pton(addr, &n->addr) == -1) {
+        return -1;
+    }
+    port = strtol(sep+1, NULL, 10);
+    if (port <= 0 || port > UINT16_MAX) {
+        return -1;
+    }
+    n->port = hton16(port);
+    return 0;
+}
+
+char *
+tcp_endpoint_ntop(struct tcp_endpoint *n, char *p, size_t size)
+{
+    size_t offset;
+
+    ip_addr_ntop(n->addr, p, size);
+    offset = strlen(p);
+    snprintf(p + offset, size - offset, ":%d", ntoh16(n->port));
+    return p;
+}
 
 static char *
 tcp_flg_ntoa(uint8_t flg)
@@ -69,6 +152,78 @@ tcp_dump(const uint8_t *data, size_t len)
     hexdump(stderr, data, len);
 #endif
     funlockfile(stderr);
+}
+
+/*
+ * TCP Protocol Control Block (PCB)
+ *
+ * NOTE: TCP PCB functions must be called after mutex locked
+ */
+
+static struct tcp_pcb *
+tcp_pcb_alloc(void)
+{
+    struct tcp_pcb *pcb;
+
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if (pcb->state == TCP_PCB_STATE_FREE) {
+            pcb->state = TCP_PCB_STATE_CLOSED;
+            pthread_cond_init(&pcb->cond, NULL);
+            return pcb;
+        }
+    }
+    return NULL;
+}
+
+static void
+tcp_pcb_release(struct tcp_pcb *pcb)
+{
+    if (pcb->wait) {
+        pthread_cond_broadcast(&pcb->cond);
+        return;
+    }
+    pthread_cond_destroy(&pcb->cond);
+    memset(pcb, 0, sizeof(*pcb));
+}
+
+static struct tcp_pcb *
+tcp_pcb_select(struct tcp_endpoint *local, struct tcp_endpoint *foreign)
+{
+    struct tcp_pcb *pcb;
+
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if ((pcb->local.addr == IP_ADDR_ANY || pcb->local.addr == local->addr) && pcb->local.port == local->port) {
+            if (!foreign) {
+                return pcb;
+            }
+            if (pcb->foreign.addr == foreign->addr && pcb->foreign.port == foreign->port) {
+                return pcb;
+            }
+        }
+    }
+    return NULL;
+}
+
+static struct tcp_pcb *
+tcp_pcb_get(int id)
+{
+    struct tcp_pcb *pcb;
+
+    if (id < 0 || id >= (int)countof(pcbs)) {
+        /* out of range */
+        return NULL;
+    }
+    pcb = &pcbs[id];
+    if (pcb->state == TCP_PCB_STATE_FREE) {
+        return NULL;
+    }
+    return pcb;
+}
+
+static int
+tcp_pcb_id(struct tcp_pcb *pcb)
+{
+    return indexof(pcbs, pcb);
 }
 
 static void
