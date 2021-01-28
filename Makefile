@@ -1,5 +1,7 @@
 APPS = app/udpc.exe \
        app/udps.exe \
+       app/tcpc.exe \
+       app/tcps.exe \
 
 TESTS = test/test.exe \
 
