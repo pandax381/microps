@@ -36,6 +36,7 @@
 
 #define TCP_DEFAULT_RTO 200000 /* micro seconds */
 #define TCP_RETRANSMIT_DEADLINE 12 /* seconds */
+#define TCP_TIMEWAIT_SEC 30 /* substitute for 2MSL */
 
 struct pseudo_hdr {
     uint32_t src;
@@ -327,6 +328,14 @@ tcp_retransmit_queue_emit(void *arg, void *data)
         entry->last = now;
         entry->rto *= 2;
     }
+}
+
+static void
+tcp_set_timewait_timer(struct tcp_pcb *pcb)
+{
+    gettimeofday(&pcb->tw_timer, NULL);
+    pcb->tw_timer.tv_sec += TCP_TIMEWAIT_SEC;
+    debugf("start time_wait timer: %d seconds", TCP_TIMEWAIT_SEC);
 }
 
 static ssize_t
@@ -662,6 +671,8 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         case TCP_PCB_STATE_CLOSING:
             if (seg->ack == pcb->snd.nxt) {
                 pcb->state = TCP_PCB_STATE_TIME_WAIT;
+                /* NOTE: set 2MSL timer, although it is not explicitly stated in the RFC */
+                tcp_set_timewait_timer(pcb);
                 pthread_cond_broadcast(&pcb->cond);
             }
             break;
@@ -675,7 +686,7 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         return;
     case TCP_PCB_STATE_TIME_WAIT:
         if (TCP_FLG_ISSET(flags, TCP_FLG_FIN)) {
-            /* TODO: restart the 2 MSL timeout */
+            tcp_set_timewait_timer(pcb); /* restart time-wait timer */
         }
         break;
     }
@@ -727,14 +738,14 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         case TCP_PCB_STATE_FIN_WAIT1:
             if (seg->ack == pcb->snd.nxt) {
                 pcb->state = TCP_PCB_STATE_TIME_WAIT;
-                /* TODO: Start the time-wait timer, turn off the other timers */
+                tcp_set_timewait_timer(pcb);
             } else {
                 pcb->state = TCP_PCB_STATE_CLOSING;
             }
             break;
         case TCP_PCB_STATE_FIN_WAIT2:
             pcb->state = TCP_PCB_STATE_TIME_WAIT;
-            /* TODO: Start the time-wait timer, turn off the other timers */
+            tcp_set_timewait_timer(pcb);
             break;
         case TCP_PCB_STATE_CLOSE_WAIT:
             /* Remain in the CLOSE-WAIT state */
@@ -747,7 +758,7 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
             break;
         case TCP_PCB_STATE_TIME_WAIT:
             /* Remain in the TIME-WAIT state */
-            /* TODO: Restart the 2 MSL time-wait timeout */
+            tcp_set_timewait_timer(pcb); /* restart time-wait timer */
             break;
         }
     }
@@ -816,11 +827,24 @@ static void
 tcp_timer(void)
 {
     struct tcp_pcb *pcb;
+    struct timeval now;
+    char addr1[IP_ADDR_STR_LEN];
+    char addr2[IP_ADDR_STR_LEN];
 
     pthread_mutex_lock(&mutex);
+    gettimeofday(&now, NULL);
     for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
         if (pcb->state == TCP_PCB_STATE_FREE) {
             continue;
+        }
+        if (pcb->state == TCP_PCB_STATE_TIME_WAIT) {
+            if (timercmp(&now, &pcb->tw_timer, >) != 0) {
+                debugf("timewait has elapsed, local=%s:%u, foreign=%s:%u",
+                    ip_addr_ntop(pcb->local.addr, addr1, sizeof(addr1)), ntoh16(pcb->local.port),
+                    ip_addr_ntop(pcb->foreign.addr, addr2, sizeof(addr2)), ntoh16(pcb->foreign.port));
+                tcp_pcb_release(pcb);
+                continue;
+            }
         }
         if (net_interrupt) {
             pthread_cond_broadcast(&pcb->cond);
