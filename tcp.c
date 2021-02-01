@@ -21,6 +21,9 @@
 
 #define TCP_PCB_SIZE 16
 
+#define TCP_PCB_MODE_RFC793 1
+#define TCP_PCB_MODE_SOCKET 2
+
 #define TCP_PCB_STATE_FREE         0
 #define TCP_PCB_STATE_CLOSED       1
 #define TCP_PCB_STATE_LISTEN       2
@@ -37,6 +40,9 @@
 #define TCP_DEFAULT_RTO 200000 /* micro seconds */
 #define TCP_RETRANSMIT_DEADLINE 12 /* seconds */
 #define TCP_TIMEWAIT_SEC 30 /* substitute for 2MSL */
+
+#define TCP_SOURCE_PORT_MIN 49152
+#define TCP_SOURCE_PORT_MAX 65535
 
 struct pseudo_hdr {
     uint32_t src;
@@ -68,6 +74,7 @@ struct tcp_segment_info {
 
 struct tcp_pcb {
     int state;
+    int mode; /* user command mode */
     struct tcp_endpoint local;
     struct tcp_endpoint foreign;
     struct {
@@ -92,6 +99,8 @@ struct tcp_pcb {
     int wait; /* number of wait for cond */
     struct queue_head queue; /* retransmit queue */
     struct timeval tw_timer;
+    struct tcp_pcb *parent;
+    struct queue_head backlog;
 };
 
 struct tcp_queue_entry {
@@ -204,10 +213,24 @@ tcp_pcb_alloc(void)
 static void
 tcp_pcb_release(struct tcp_pcb *pcb)
 {
+    struct queue_entry *entry;
+    struct tcp_pcb *est;
+    char addr1[IP_ADDR_STR_LEN];
+    char addr2[IP_ADDR_STR_LEN];
+
     if (pcb->wait) {
         pthread_cond_broadcast(&pcb->cond);
         return;
     }
+    while ((entry = queue_pop(&pcb->queue)) != NULL) {
+        free(entry);
+    }
+    while ((est = queue_pop(&pcb->backlog)) != NULL) {
+        tcp_pcb_release(est);
+    }
+    debugf("released, local=%s:%d, foreign=%s:%u",
+        ip_addr_ntop(pcb->local.addr, addr1, sizeof(addr1)), ntoh16(pcb->local.port),
+        ip_addr_ntop(pcb->foreign.addr, addr2, sizeof(addr2)), ntoh16(pcb->foreign.port));
     pthread_cond_destroy(&pcb->cond);
     memset(pcb, 0, sizeof(*pcb));
 }
@@ -396,7 +419,7 @@ tcp_output(struct tcp_pcb *pcb, uint8_t flg, uint8_t *data, size_t len)
 static void
 tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign)
 {
-    struct tcp_pcb *pcb;
+    struct tcp_pcb *pcb, *new_pcb;
     int acceptable = 0;
 
     pcb = tcp_pcb_select(local, foreign);
@@ -432,6 +455,16 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         if (TCP_FLG_ISSET(flags, TCP_FLG_SYN)) {
             /* ignore: security/compartment check */
             /* ignore: precedence check */
+            if (pcb->mode == TCP_PCB_MODE_SOCKET) {
+                new_pcb = tcp_pcb_alloc();
+                if (!new_pcb) {
+                    errorf("tcp_pcb_alloc() failure");
+                    return;
+                }
+                new_pcb->mode = TCP_PCB_MODE_SOCKET;
+                new_pcb->parent = pcb;
+                pcb = new_pcb;
+            }
             pcb->local = *local;
             pcb->foreign = *foreign;
             pcb->rcv.wnd = sizeof(pcb->buf);
@@ -630,6 +663,10 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         if (pcb->snd.una <= seg->ack && seg->ack <= pcb->snd.nxt) {
             pcb->state = TCP_PCB_STATE_ESTABLISHED;
             pthread_cond_broadcast(&pcb->cond);
+            if (pcb->parent) {
+                queue_push(&pcb->parent->backlog, pcb);
+                pthread_cond_broadcast(&pcb->parent->cond);
+            }
         } else {
             tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, foreign);
             return;
@@ -891,6 +928,7 @@ tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int ac
         pthread_mutex_unlock(&mutex);
         return -1;
     }
+    pcb->mode = TCP_PCB_MODE_RFC793;
     if (!active) {
         debugf("passive open: local=%s:%u, waiting for connection...",
             ip_addr_ntop(local->addr, addr1, sizeof(addr1)), ntoh16(local->port));
@@ -966,10 +1004,230 @@ tcp_state(int id)
         pthread_mutex_unlock(&mutex);
         return -1;
     }
+    if (pcb->mode != TCP_PCB_MODE_RFC793) {
+        errorf("not opened in rfc793 mode");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
     state = pcb->state;
     pthread_mutex_unlock(&mutex);
     return state;
 }
+
+/*
+ * TCP User Command (Socket)
+ */
+
+int
+tcp_open(void)
+{
+    struct tcp_pcb *pcb;
+    int id;
+
+    pthread_mutex_lock(&mutex);
+    pcb = tcp_pcb_alloc();
+    if (!pcb) {
+        errorf("tcp_pcb_alloc() failure");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pcb->mode = TCP_PCB_MODE_SOCKET;
+    id = tcp_pcb_id(pcb);
+    pthread_mutex_unlock(&mutex);
+    return id;
+}
+
+int
+tcp_connect(int id, struct tcp_endpoint *foreign)
+{
+    struct tcp_pcb *pcb;
+    struct tcp_endpoint local;
+    struct ip_iface *iface;
+    char addr[IP_ADDR_STR_LEN];
+    int p;
+    int state;
+    struct timespec timeout;
+
+    pthread_mutex_lock(&mutex);
+    pcb = tcp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (pcb->mode != TCP_PCB_MODE_SOCKET) {
+        errorf("not opened in socket mode");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    local.addr = pcb->local.addr;
+    local.port = pcb->local.port;
+    if (local.addr == IP_ADDR_ANY) {
+        iface = ip_route_get_iface(foreign->addr);
+        if (!iface) {
+            errorf("");
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+        debugf("select source address: %s", ip_addr_ntop(iface->unicast, addr, sizeof(addr)));
+        local.addr = iface->unicast;
+    }
+    if (!local.port) {
+        for (p = TCP_SOURCE_PORT_MIN; p <= TCP_SOURCE_PORT_MAX; p++) {
+            local.port = p;
+            if (!tcp_pcb_select(&local, foreign)) {
+                debugf("dinamic assign srouce port: %d", ntoh16(local.port));
+                pcb->local.port = local.port;
+                break;
+            }
+        }
+        if (!local.port) {
+            debugf("failed to dinamic assign srouce port");
+            pthread_mutex_unlock(&mutex);
+            return -1;
+        }
+    }
+    pcb->local.addr = local.addr;
+    pcb->local.port = local.port;
+    pcb->foreign.addr = foreign->addr;
+    pcb->foreign.port = foreign->port;
+    pcb->rcv.wnd = sizeof(pcb->buf);
+    pcb->iss = random();
+    if (tcp_output(pcb, TCP_FLG_SYN, NULL, 0) == -1) {
+        errorf("tcp_output() failure");
+        pcb->state = TCP_PCB_STATE_CLOSED;
+        tcp_pcb_release(pcb);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pcb->snd.una = pcb->iss;
+    pcb->snd.nxt = pcb->iss + 1;
+    pcb->state = TCP_PCB_STATE_SYN_SENT;
+AGAIN:
+    state = pcb->state;
+    // waiting for state changed
+    while ((pcb->state == state) && !net_interrupt) {
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timespec_add_nsec(&timeout, 10000000); /* 100ms */
+        pcb->wait++;
+        pthread_cond_timedwait(&pcb->cond, &mutex, &timeout);
+        pcb->wait--;
+    }
+    if (pcb->state != TCP_PCB_STATE_ESTABLISHED) {
+        if (pcb->state == TCP_PCB_STATE_SYN_RECEIVED) {
+            goto AGAIN;
+        }
+        errorf("open error: %d", pcb->state);
+        pcb->state = TCP_PCB_STATE_CLOSED;
+        tcp_pcb_release(pcb);
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    id = tcp_pcb_id(pcb);
+    pthread_mutex_unlock(&mutex);
+    return id;
+}
+
+int
+tcp_bind(int id, struct tcp_endpoint *local)
+{
+    struct tcp_pcb *pcb, *exist;
+    char addr[IP_ADDR_STR_LEN];
+
+    pthread_mutex_lock(&mutex);
+    pcb = tcp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (pcb->mode != TCP_PCB_MODE_SOCKET) {
+        errorf("not opened in socket mode");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    exist = tcp_pcb_select(local, NULL);
+    if (exist) {
+        errorf("already bound, addr=%s, port=%u", ip_addr_ntop(exist->local.addr, addr, sizeof(addr)), ntoh16(exist->local.port));
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pcb->local = *local;
+    debugf("success: addr=%s, port=%u", ip_addr_ntop(pcb->local.addr, addr, sizeof(addr)), ntoh16(pcb->local.port));
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}
+
+int
+tcp_listen(int id, int backlog)
+{
+    struct tcp_pcb *pcb;
+
+    pthread_mutex_lock(&mutex);
+    pcb = tcp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (pcb->mode != TCP_PCB_MODE_SOCKET) {
+        errorf("not opened in socket mode");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    pcb->state = TCP_PCB_STATE_LISTEN;
+    (void)backlog; // TODO: set backlog
+    pthread_mutex_unlock(&mutex);
+    return 0;
+}
+
+int
+tcp_accept(int id, struct tcp_endpoint *foreign)
+{
+    struct tcp_pcb *pcb, *new_pcb;
+    int new_id;
+    struct timespec timeout;
+
+    pthread_mutex_lock(&mutex);
+    pcb = tcp_pcb_get(id);
+    if (!pcb) {
+        errorf("pcb not found");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (pcb->mode != TCP_PCB_MODE_SOCKET) {
+        errorf("not opened in socket mode");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (pcb->state != TCP_PCB_STATE_LISTEN) {
+        errorf("not in LISTEN state");
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    while (!(new_pcb = (struct tcp_pcb *)queue_pop(&pcb->backlog)) && !net_interrupt) {
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timespec_add_nsec(&timeout, 10000000); /* 100ms */
+        pcb->wait++;
+        pthread_cond_timedwait(&pcb->cond, &mutex, &timeout);
+        pcb->wait--;
+    }
+    if (!new_pcb) {
+        /* interrup */
+        pthread_mutex_unlock(&mutex);
+        return -1;
+    }
+    if (foreign) {
+        *foreign = new_pcb->foreign;
+    }
+    new_id = tcp_pcb_id(new_pcb);
+    pthread_mutex_unlock(&mutex);
+    return new_id;
+}
+
+/*
+ * TCP User Command (Common)
+ */
 
 ssize_t
 tcp_send(int id, uint8_t *data, size_t len)
