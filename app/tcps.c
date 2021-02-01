@@ -80,9 +80,10 @@ setup(void)
 int
 main(int argc, char *argv[])
 {
-    int soc;
+    int soc, acc;
     long int port;
-    struct tcp_endpoint local = {};
+    struct tcp_endpoint local = {}, foreign;
+    char ep[TCP_ENDPOINT_STR_LEN];
     uint8_t buf[1024];
     ssize_t ret;
 
@@ -118,13 +119,27 @@ main(int argc, char *argv[])
     /*
      *  Application Code
      */
-    soc = tcp_open_rfc793(&local, NULL, 0); /* passive open */
+    soc = tcp_open();
     if (soc == -1) {
-        errorf("tcp_open_rfc793() failure");
+        errorf("tcp_open() failure");
         return -1;
     }
+    if (tcp_bind(soc, &local) == -1) {
+        errorf("tcp_bind() failure");
+        return -1;
+    }
+    if (tcp_listen(soc, 1) == -1) {
+        errorf("tcp_listen() failure");
+        return -1;
+    }
+    acc = tcp_accept(soc, &foreign);
+    if (acc == -1) {
+        errorf("tcp_accept() failure");
+        return -1;
+    }
+    infof("connection accepted, foreign=%s", tcp_endpoint_ntop(&foreign, ep, sizeof(ep)));
     while (!terminate) {
-        ret = tcp_receive(soc, buf, sizeof(buf));
+        ret = tcp_receive(acc, buf, sizeof(buf));
         if (ret == -1) {
             errorf("tcp_receive() failure");
             break;
@@ -135,7 +150,7 @@ main(int argc, char *argv[])
         }
         infof("%zu bytes received", ret);
         hexdump(stderr, buf, ret);
-        if (tcp_send(soc, buf, ret) == -1) {
+        if (tcp_send(acc, buf, ret) == -1) {
             errorf("tcp_send() failure");
             break;
         }

@@ -128,9 +128,19 @@ main(int argc, char *argv[])
     /*
      *  Application Code
      */
-    soc = tcp_open_rfc793(&local, &foreign, 1); /* active open */
+    soc = tcp_open();
     if (soc == -1) {
-        errorf("tcp_open_rfc793() failure");
+        errorf("tcp_open() failure");
+        return -1;
+    }
+    if (local.port) {
+        if (tcp_bind(soc, &local) == -1) {
+            errorf("tcp_bind() failure");
+            return -1;
+        }
+    }
+    if (tcp_connect(soc, &foreign) == -1) {
+        errorf("tcp_connect() failure");
         return -1;
     }
     infof("connection established");
