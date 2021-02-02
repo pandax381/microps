@@ -152,6 +152,67 @@ Logs
 18:44:01.606 [D] net_shutdown: shutdown (net.c:345)
 ```
 
+## Tutorial
+
+Build
+
+```
+$ git clone git@github.com:pandax381/microps.git
+$ cd microps
+$ make
+```
+
+Prepare Tap device
+
+```
+$ sudo ip tuntap add mode tap user $USER name tap0
+$ sudo ip addr add 192.0.2.1/24 dev tap0
+$ sudo ip link set tap0 up
+```
+
+> It is temporary and will disappear after reboot.
+
+Run sample application
+
+```
+$ ./app/tcps.exe 7
+11:48:55.884 [I] net_protocol_register: registerd, type=ARP(0x0806) (net.c:223)
+11:48:55.884 [I] net_timer_register: registerd: ARP Timer interval={1, 0} (net.c:257)
+11:48:55.884 [I] net_protocol_register: registerd, type=IP(0x0800) (net.c:223)
+...
+11:48:55.884 [D] net_run: running... (net.c:324)
+11:48:55.884 [D] tcp_bind: success: addr=0.0.0.0, port=7 (tcp.c:1156)
+```
+
+> TCP Echo Server start on port 7. (default address is 192.0.2.2/24)
+
+Test (Operate in another terminal)
+
++ Ping
+
+```
+$ ping 192.0.2.1
+PING 192.0.2.2 (192.0.2.2) 56(84) bytes of data.
+64 bytes from 192.0.2.2: icmp_seq=1 ttl=255 time=0.660 ms
+64 bytes from 192.0.2.2: icmp_seq=2 ttl=255 time=0.688 ms
+64 bytes from 192.0.2.2: icmp_seq=3 ttl=255 time=0.574 ms
+...
+```
+
++ TCP communication
+```
+$ nc 192.0.2.1 7
+foo
+foo
+bar
+bar
+```
+
+> Sending text will be sent back by the Echo Server.
+
+
+### 
+
 ## License
 
 microps is under the MIT License: See [LICENSE](./LICENSE) file.
