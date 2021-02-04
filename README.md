@@ -25,6 +25,7 @@ Devices
 - [x] Loopback
 - [x] Ethernet
   - [x] TUN/TAP (Linux)
+  - [x] PF_PACKET (Linux)
 
 Protocols
 

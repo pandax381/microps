@@ -21,7 +21,7 @@ CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
 
 ifeq ($(shell uname),Linux)
        CFLAGS := $(CFLAGS) -pthread
-       DRIVERS := $(DRIVERS) driver/ether_tap_linux.o
+       DRIVERS := $(DRIVERS) driver/ether_tap_linux.o driver/ether_pcap_linux.o
 endif
 
 ifeq ($(shell uname),Darwin)
