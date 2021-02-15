@@ -192,7 +192,7 @@ Test (Operate in another terminal)
 + Ping
 
 ```
-$ ping 192.0.2.1
+$ ping 192.0.2.2
 PING 192.0.2.2 (192.0.2.2) 56(84) bytes of data.
 64 bytes from 192.0.2.2: icmp_seq=1 ttl=255 time=0.660 ms
 64 bytes from 192.0.2.2: icmp_seq=2 ttl=255 time=0.688 ms
@@ -202,7 +202,7 @@ PING 192.0.2.2 (192.0.2.2) 56(84) bytes of data.
 
 + TCP communication
 ```
-$ nc 192.0.2.1 7
+$ nc 192.0.2.2 7
 foo
 foo
 bar
