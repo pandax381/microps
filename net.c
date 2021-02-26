@@ -94,13 +94,31 @@ net_device_close(struct net_device *dev)
 int
 net_device_add_iface(struct net_device *dev, struct net_iface *iface)
 {
+    struct net_iface *entry;
 
+    for (entry = dev->ifaces; entry; entry = entry->next) {
+        if (entry->family == iface->family) {
+            errorf("already exists, dev=%s, family=%d", dev->name, entry->family);
+            return -1;
+        }
+    }
+    iface->next = dev->ifaces;
+    iface->dev = dev;
+    dev->ifaces = iface;
+    return 0;
 }
 
 struct net_iface *
 net_device_get_iface(struct net_device *dev, int family)
 {
+    struct net_iface *entry;
 
+    for (entry = dev->ifaces; entry; entry = entry->next) {
+        if (entry->family == family) {
+            break;
+        }
+    }
+    return entry;
 }
 
 int
