@@ -179,17 +179,57 @@ static volatile sig_atomic_t terminate;
 static void *
 net_thread(void *arg)
 {
+    unsigned int count, num;
+    struct net_device *dev;
+    struct net_protocol *proto;
+    struct net_protocol_queue_entry *entry;
 
+    while (!terminate) {
+        count = 0;
+        for (dev = devices; dev; dev = dev->next) {
+            if (NET_DEVICE_IS_UP(dev)) {
+                if (dev->ops->poll) {
+                    if (dev->ops->poll(dev) != -1) {
+                        count++;
+                    }
+                }
+            }
+        }
+        for (proto = protocols; proto; proto = proto->next) {
+            pthread_mutex_lock(&proto->mutex);
+            entry = (struct net_protocol_queue_entry *)queue_pop(&proto->queue);
+            num = proto->queue.num;
+            pthread_mutex_unlock(&proto->mutex);
+            if (entry) {
+                debugf("queue popped (num:%u), dev=%s, type=0x%04x, len=%zd", num, entry->dev->name, proto->type, entry->len);
+                debugdump((uint8_t *)(entry+1), entry->len);
+                proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
+                free(entry);
+                count++;
+            }
+        }
+        if (!count) {
+            usleep(NET_THREAD_SLEEP_TIME);
+        }
+    }
+    return NULL;
 }
 
 int
 net_run(void)
 {
     struct net_device *dev;
+    int err;
 
     debugf("open all devices...");
     for (dev = devices; dev; dev = dev->next) {
         net_device_open(dev);
+    }
+    debugf("create background thread...");
+    err = pthread_create(&thread, NULL, net_thread, NULL);
+    if (err) {
+        errorf("pthread_create() failure, err=%d", err);
+        return -1;
     }
     debugf("running...");
     return 0;
@@ -199,7 +239,15 @@ void
 net_shutdown(void)
 {
     struct net_device *dev;
+    int err;
 
+    debugf("terminate background thread...");
+    terminate = 1;
+    err = pthread_join(thread, NULL);
+    if (err) {
+        errorf("pthread_join() failure, err=%d", err);
+        return;
+    }
     debugf("close all devices...");
     for (dev = devices; dev; dev = dev->next) {
         net_device_close(dev);
