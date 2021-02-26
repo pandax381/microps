@@ -4,6 +4,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <signal.h>
 
 #include "util.h"
 #include "net.h"
@@ -168,6 +169,17 @@ net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t
     protocols = proto;
     infof("registered, type=0x%04x", type);
     return 0;
+}
+
+#define NET_THREAD_SLEEP_TIME 1000 /* micro seconds */
+
+static pthread_t thread;
+static volatile sig_atomic_t terminate;
+
+static void *
+net_thread(void *arg)
+{
+
 }
 
 int
