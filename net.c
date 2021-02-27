@@ -215,7 +215,20 @@ net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t
 int
 net_timer_register(struct timeval interval, void (*handler)(void))
 {
+    struct net_timer *timer;
 
+    timer = calloc(1, sizeof(*timer));
+    if (!timer) {
+        errorf("calloc() failure");
+        return -1;
+    }
+    timer->interval = interval;
+    gettimeofday(&timer->last, NULL);
+    timer->handler = handler;
+    timer->next = timers;
+    timers = timer;
+    infof("registered: interval={%d, %d}", interval.tv_sec, interval.tv_usec);
+    return 0;
 }
 
 #define NET_THREAD_SLEEP_TIME 1000 /* micro seconds */
@@ -230,6 +243,8 @@ net_thread(void *arg)
     struct net_device *dev;
     struct net_protocol *proto;
     struct net_protocol_queue_entry *entry;
+    struct net_timer *timer;
+    struct timeval now, diff;
 
     while (!terminate) {
         count = 0;
@@ -253,6 +268,14 @@ net_thread(void *arg)
                 proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
                 free(entry);
                 count++;
+            }
+        }
+        for (timer = timers; timer; timer = timer->next) {
+            gettimeofday(&now, NULL);
+            timersub(&now, &timer->last, &diff);
+            if (timercmp(&timer->interval, &diff, <) != 0) { /* true (!0) or false (0) */
+                timer->handler();
+                timer->last = now;
             }
         }
         if (!count) {
