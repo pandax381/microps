@@ -177,6 +177,12 @@ arp_cache_delete(struct arp_cache *cache)
 }
 
 static int
+arp_request(struct net_iface *iface, ip_addr_t tpa)
+{
+
+}
+
+static int
 arp_reply(struct net_iface *iface, const uint8_t *tha, ip_addr_t tpa, const uint8_t *dst)
 {
     struct arp_ether reply;
