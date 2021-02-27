@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/time.h>
 
 #ifndef IFNAMSIZ
 #define IFNAMSIZ 16
@@ -82,6 +83,8 @@ net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_dev
 
 extern int
 net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t len, struct net_device *dev));
+extern int
+net_timer_register(struct timeval interval, void (*handler)(void));
 
 extern int
 net_run(void);

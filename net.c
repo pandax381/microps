@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/time.h>
 
 #include "util.h"
 #include "net.h"
@@ -23,9 +24,17 @@ struct net_protocol_queue_entry {
     size_t len;
 };
 
+struct net_timer {
+    struct net_timer *next;
+    struct timeval interval;
+    struct timeval last;
+    void (*handler)(void);
+};
+
 /* NOTE: if you want to add/delete the entries after net_run(), you need to protect these lists with a mutex. */
 static struct net_device *devices;
 static struct net_protocol *protocols;
+static struct net_timer *timers;
 
 struct net_device *
 net_device_alloc(void)
@@ -200,6 +209,13 @@ net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t
     protocols = proto;
     infof("registered, type=0x%04x", type);
     return 0;
+}
+
+/* NOTE: must not be call after net_run() */
+int
+net_timer_register(struct timeval interval, void (*handler)(void))
+{
+
 }
 
 #define NET_THREAD_SLEEP_TIME 1000 /* micro seconds */
