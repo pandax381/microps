@@ -220,7 +220,7 @@ arp_input(const uint8_t *data, size_t len, struct net_device *dev)
 {
     struct arp_ether *msg;
     ip_addr_t spa, tpa;
-    int marge = 0;
+    int merge = 0;
     struct net_iface *iface;
 
     if (len < sizeof(*msg)) {
@@ -243,12 +243,12 @@ arp_input(const uint8_t *data, size_t len, struct net_device *dev)
     pthread_mutex_lock(&mutex);
     if (arp_cache_update(spa, msg->sha)) {
         /* updated */
-        marge = 1;
+        merge = 1;
     }
     pthread_mutex_unlock(&mutex);
     iface = net_device_get_iface(dev, NET_IFACE_FAMILY_IP);
     if (iface && ((struct ip_iface *)iface)->unicast == tpa) {
-        if (!marge) {
+        if (!merge) {
             pthread_mutex_lock(&mutex);
             arp_cache_insert(spa, msg->sha);
             pthread_mutex_unlock(&mutex);
