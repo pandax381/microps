@@ -22,6 +22,17 @@ extern ssize_t
 udp_output(struct udp_endpoint *src, struct udp_endpoint *dst, const uint8_t *buf, size_t len);
 
 extern int
+udp_open(void);
+extern int
+udp_bind(int index, struct udp_endpoint *local);
+extern ssize_t
+udp_sendto(int id, uint8_t *buf, size_t len, struct udp_endpoint *foreign);
+extern ssize_t
+udp_recvfrom(int id, uint8_t *buf, size_t size, struct udp_endpoint *foreign);
+extern int
+udp_close(int id);
+
+extern int
 udp_init(void);
 
 #endif

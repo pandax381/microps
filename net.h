@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/time.h>
+#include <signal.h>
 
 #ifndef IFNAMSIZ
 #define IFNAMSIZ 16
@@ -85,6 +86,15 @@ extern int
 net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t len, struct net_device *dev));
 extern int
 net_timer_register(struct timeval interval, void (*handler)(void));
+
+extern void
+net_interrupt(void);
+extern struct net_interrupt_ctx *
+net_interrupt_subscribe(void);
+extern int
+net_interrupt_occurred(struct net_interrupt_ctx *ctx);
+extern int
+net_interrupt_unsubscribe(struct net_interrupt_ctx *ctx);
 
 extern int
 net_run(void);

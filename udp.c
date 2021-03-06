@@ -3,10 +3,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <pthread.h>
 
 #include "util.h"
+#include "net.h"
 #include "ip.h"
 #include "udp.h"
+
+#define UDP_PCB_SIZE 16
+
+#define UDP_PCB_STATE_FREE    0
+#define UDP_PCB_STATE_OPEN    1
+#define UDP_PCB_STATE_CLOSING 2
+
+/* see https://tools.ietf.org/html/rfc6335 */
+#define UDP_SOURCE_PORT_MIN 49152
+#define UDP_SOURCE_PORT_MAX 65535
 
 struct pseudo_hdr {
     uint32_t src;
@@ -22,6 +34,23 @@ struct udp_hdr {
     uint16_t len;
     uint16_t sum;
 };
+
+struct udp_pcb {
+    int state;
+    struct udp_endpoint local;
+    struct queue_head queue; /* receive queue */
+    int wait; /* number of wait for cond */
+    pthread_cond_t cond;
+};
+
+/* NOTE: the data follows immediately after the structure */
+struct udp_queue_entry {
+    struct udp_endpoint foreign;
+    uint16_t len;
+};
+
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct udp_pcb pcbs[UDP_PCB_SIZE];
 
 int
 udp_endpoint_pton(char *p, struct udp_endpoint *n)
@@ -72,6 +101,48 @@ udp_dump(const uint8_t *data, size_t len)
     hexdump(stderr, data, len);
 #endif
     funlockfile(stderr);
+}
+
+/*
+ * UDP Protocol Control Block (PCB)
+ *
+ * NOTE: UDP PCB functions must be called after mutex locked
+ */
+
+static struct udp_pcb *
+udp_pcb_alloc(void)
+{
+
+}
+
+static void
+udp_pcb_release(struct udp_pcb *pcb)
+{
+
+}
+
+static struct udp_pcb *
+udp_pcb_select(ip_addr_t addr, uint16_t port)
+{
+
+}
+
+static struct udp_pcb *
+udp_pcb_get(int id)
+{
+
+}
+
+static int
+udp_pcb_id(struct udp_pcb *pcb)
+{
+
+}
+
+static struct udp_queue_entry *
+udp_pcb_queue_pop(struct udp_pcb *pcb)
+{
+
 }
 
 static void
@@ -145,6 +216,40 @@ udp_output(struct udp_endpoint *src, struct udp_endpoint *dst, const  uint8_t *d
         return -1;
     }
     return len;
+}
+
+/*
+ * UDP User Commands
+ */
+
+int
+udp_open(void)
+{
+
+}
+
+int
+udp_close(int id)
+{
+
+}
+
+int
+udp_bind(int id, struct udp_endpoint *local)
+{
+
+}
+
+ssize_t
+udp_sendto(int id, uint8_t *data, size_t len, struct udp_endpoint *foreign)
+{
+
+}
+
+ssize_t
+udp_recvfrom(int id, uint8_t *buf, size_t size, struct udp_endpoint *foreign)
+{
+
 }
 
 int
