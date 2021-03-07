@@ -326,7 +326,87 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         }
         return;
     }
-    /* implemented in the next step */
+    switch(pcb->state) {
+    case TCP_PCB_STATE_LISTEN:
+        /*
+         * 1st check for an RST
+         */
+
+        /*
+         * 2nd check for an ACK
+         */
+
+        /*
+         * 3rd check for an SYN
+         */
+
+        /*
+         * 4th other text or control
+         */
+
+        /* drop segment */
+        return;
+    case TCP_PCB_STATE_SYN_SENT:
+        /*
+         * 1st check the ACK bit
+         */
+
+        /*
+         * 2nd check the RST bit
+         */
+
+        /*
+         * 3rd check security and precedence (ignore)
+         */
+
+        /*
+         * 4th check the SYN bit
+         */
+
+        /*
+         * 5th, if neither of the SYN or RST bits is set then drop the segment and return
+         */
+
+        /* drop segment */
+        return;
+    }
+    /*
+     * Otherwise
+     */
+
+    /*
+     * 1st check sequence number
+     */
+
+    /*
+     * 2nd check the RST bit
+     */
+
+    /*
+     * 3rd check security and precedence (ignore)
+     */
+
+    /*
+     * 4th check the SYN bit
+     */
+
+    /*
+     * 5th check the ACK field
+     */
+
+    /*
+     * 6th, check the URG bit (ignore)
+     */
+
+    /*
+     * 7th, process the segment text
+     */
+
+    /*
+     * 8th, check the FIN bit
+     */
+
+    return;
 }
 
 static void
@@ -386,6 +466,22 @@ tcp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
     tcp_segment_arrives(&seg, hdr->flg, (uint8_t *)hdr + hlen, len - hlen, &local, &foreign);
     pthread_mutex_unlock(&mutex);
     return;
+}
+
+/*
+ * TCP User Command (RFC793)
+ */
+
+int
+tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int active)
+{
+
+}
+
+int
+tcp_close(int id)
+{
+
 }
 
 int
