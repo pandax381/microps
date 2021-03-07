@@ -171,56 +171,162 @@ tcp_dump(const uint8_t *data, size_t len)
 static struct tcp_pcb *
 tcp_pcb_alloc(void)
 {
+    struct tcp_pcb *pcb;
 
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if (pcb->state == TCP_PCB_STATE_FREE) {
+            pcb->state = TCP_PCB_STATE_CLOSED;
+            pthread_cond_init(&pcb->cond, NULL);
+            return pcb;
+        }
+    }
+    return NULL;
 }
 
 static void
 tcp_pcb_release(struct tcp_pcb *pcb)
 {
-
+    if (pcb->wait) {
+        pthread_cond_broadcast(&pcb->cond);
+        return;
+    }
+    pthread_cond_destroy(&pcb->cond);
+    memset(pcb, 0, sizeof(*pcb));
 }
 
 static struct tcp_pcb *
 tcp_pcb_select(struct tcp_endpoint *local, struct tcp_endpoint *foreign)
 {
+    struct tcp_pcb *pcb, *listen_pcb = NULL;
 
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if ((pcb->local.addr == IP_ADDR_ANY || pcb->local.addr == local->addr) && pcb->local.port == local->port) {
+            if (!foreign) {
+                return pcb;
+            }
+            if (pcb->foreign.addr == foreign->addr && pcb->foreign.port == foreign->port) {
+                return pcb;
+            }
+            if (pcb->state == TCP_PCB_STATE_LISTEN) {
+                if (pcb->foreign.addr == IP_ADDR_ANY && pcb->foreign.port == 0) {
+                    /* LISTENed with wildcard foreign address/port */
+                    listen_pcb = pcb;
+                }
+            }
+        }
+    }
+    return listen_pcb;
 }
 
 static int
 tcp_pcb_cond_wait(struct tcp_pcb *pcb)
 {
+    struct timespec timeout;
+    int ret;
 
+    clock_gettime(CLOCK_REALTIME, &timeout);
+    timespec_add_nsec(&timeout, 10000000); /* 100ms */
+    pcb->wait++;
+    ret = pthread_cond_timedwait(&pcb->cond, &mutex, &timeout);
+    pcb->wait--;
+    return ret;
 }
 
 static struct tcp_pcb *
 tcp_pcb_get(int id)
 {
+    struct tcp_pcb *pcb;
 
+    if (id < 0 || id >= (int)countof(pcbs)) {
+        /* out of range */
+        return NULL;
+    }
+    pcb = &pcbs[id];
+    if (pcb->state == TCP_PCB_STATE_FREE) {
+        return NULL;
+    }
+    return pcb;
 }
 
 static int
 tcp_pcb_id(struct tcp_pcb *pcb)
 {
-
+    return indexof(pcbs, pcb);
 }
 
 static ssize_t
 tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign)
 {
+    uint8_t buf[IP_PAYLOAD_SIZE_MAX] = {};
+    struct tcp_hdr *hdr;
+    struct pseudo_hdr pseudo;
+    uint16_t psum;
+    uint16_t total;
+    char ep1[TCP_ENDPOINT_STR_LEN];
+    char ep2[TCP_ENDPOINT_STR_LEN];
 
+    hdr = (struct tcp_hdr *)buf;
+    hdr->src = local->port;
+    hdr->dst = foreign->port;
+    hdr->seq = hton32(seq);
+    hdr->ack = hton32(ack);
+    hdr->off = (sizeof(*hdr) >> 2) << 4;
+    hdr->flg = flg;
+    hdr->wnd = hton16(wnd);
+    hdr->sum = 0;
+    hdr->up = 0;
+    memcpy(hdr + 1, data, len);
+    pseudo.src = local->addr;
+    pseudo.dst = foreign->addr;
+    pseudo.zero = 0;
+    pseudo.protocol = IP_PROTOCOL_TCP;
+    total = sizeof(*hdr) + len;
+    pseudo.len = hton16(total);
+    psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
+    hdr->sum = cksum16((uint16_t *)hdr, total, psum);
+    debugf("%s => %s, len=%zu (payload=%zu)",
+        tcp_endpoint_ntop(local, ep1, sizeof(ep1)), tcp_endpoint_ntop(foreign, ep2, sizeof(ep2)), total, len);
+    tcp_dump((uint8_t *)hdr, total);
+    if (ip_output(IP_PROTOCOL_TCP, (uint8_t *)hdr, total, local->addr, foreign->addr) == -1) {
+        return -1;
+    }
+    return len;
 }
 
 static ssize_t
 tcp_output(struct tcp_pcb *pcb, uint8_t flg, uint8_t *data, size_t len)
 {
+    uint32_t seq;
 
+    seq = pcb->snd.nxt;
+    if (TCP_FLG_ISSET(flg, TCP_FLG_SYN)) {
+        seq = pcb->iss;
+    }
+    if (TCP_FLG_ISSET(flg, TCP_FLG_SYN | TCP_FLG_FIN) || len) {
+        /* TODO: add retransmission queue */
+    }
+    return tcp_output_segment(seq, pcb->rcv.nxt, flg, pcb->rcv.wnd, data, len, &pcb->local, &pcb->foreign);
 }
 
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
 static void
 tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign)
 {
+    struct tcp_pcb *pcb;
 
+    pcb = tcp_pcb_select(local, foreign);
+    if (!pcb || pcb->state == TCP_PCB_STATE_CLOSED) {
+        if (TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
+            return;
+        }
+        if (!TCP_FLG_ISSET(flags, TCP_FLG_ACK)) {
+            tcp_output_segment(0, seg->seq + seg->len, TCP_FLG_RST | TCP_FLG_ACK, 0, NULL, 0, local, foreign);
+        } else {
+            tcp_output_segment(seg->ack, 0, TCP_FLG_RST, 0, NULL, 0, local, foreign);
+        }
+        return;
+    }
+    /* implemented in the next step */
 }
 
 static void
@@ -231,6 +337,9 @@ tcp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
     uint16_t psum;
     char addr1[IP_ADDR_STR_LEN];
     char addr2[IP_ADDR_STR_LEN];
+    struct tcp_endpoint local, foreign;
+    uint16_t hlen;
+    struct tcp_segment_info seg;
 
     if (len < sizeof(*hdr)) {
         errorf("too short");
@@ -257,6 +366,25 @@ tcp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
         ip_addr_ntop(dst, addr2, sizeof(addr2)), ntoh16(hdr->dst),
         len, len - sizeof(*hdr));
     tcp_dump(data, len);
+    local.addr = dst;
+    local.port = hdr->dst;
+    foreign.addr = src;
+    foreign.port = hdr->src;
+    hlen = (hdr->off >> 4) << 2;
+    seg.seq = ntoh32(hdr->seq);
+    seg.ack = ntoh32(hdr->ack);
+    seg.len = len - hlen;
+    if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_SYN)) {
+        seg.len++; /* SYN flag consumes one sequence number */
+    }
+    if (TCP_FLG_ISSET(hdr->flg, TCP_FLG_FIN)) {
+        seg.len++; /* FIN flag consumes one sequence number */
+    }
+    seg.wnd = ntoh16(hdr->wnd);
+    seg.up = ntoh16(hdr->up);
+    pthread_mutex_lock(&mutex);
+    tcp_segment_arrives(&seg, hdr->flg, (uint8_t *)hdr + hlen, len - hlen, &local, &foreign);
+    pthread_mutex_unlock(&mutex);
     return;
 }
 
