@@ -3,7 +3,6 @@ microps
 
 microps is an implementation of a small TCP/IP protocol stack for learning.
 
-+ Old master branch: https://github.com/pandax381/microps/tree/master
 + If you love the Go language: https://github.com/pandax381/lectcp
 + Porting to xv6: https://github.com/pandax381/xv6-net
 
