@@ -268,8 +268,8 @@ ip_iface_register(struct net_device *dev, struct ip_iface *iface)
     infof("registerd: dev=%s, unicast=%s, netmask=%s, broadcast=%s",
         dev->name,
         ip_addr_ntop(iface->unicast, addr1, sizeof(addr1)),
-        ip_addr_ntop(iface->unicast, addr2, sizeof(addr2)),
-        ip_addr_ntop(iface->netmask, addr3, sizeof(addr3)));
+        ip_addr_ntop(iface->netmask, addr2, sizeof(addr2)),
+        ip_addr_ntop(iface->broadcast, addr3, sizeof(addr3)));
     return 0;
 }
 
