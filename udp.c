@@ -36,7 +36,7 @@ struct udp_hdr {
 
 struct udp_pcb {
     int state;
-    struct udp_endpoint local;
+    struct ip_endpoint local;
     struct queue_head queue; /* receive queue */
     int wait; /* number of wait for cond */
     pthread_cond_t cond;
@@ -44,46 +44,12 @@ struct udp_pcb {
 
 /* NOTE: the data follows immediately after the structure */
 struct udp_queue_entry {
-    struct udp_endpoint foreign;
+    struct ip_endpoint foreign;
     uint16_t len;
 };
 
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct udp_pcb pcbs[UDP_PCB_SIZE];
-
-int
-udp_endpoint_pton(char *p, struct udp_endpoint *n)
-{
-    char *sep;
-    char addr[IP_ADDR_STR_LEN] = {};
-    long int port;
-
-    sep = strrchr(p, ':');
-    if (!sep) {
-        return -1;
-    }
-    memcpy(addr, p, sep - p);
-    if (ip_addr_pton(addr, &n->addr) == -1) {
-        return -1;
-    }
-    port = strtol(sep+1, NULL, 10);
-    if (port <= 0 || port > UINT16_MAX) {
-        return -1;
-    }
-    n->port = hton16(port);
-    return 0;
-}
-
-char *
-udp_endpoint_ntop(struct udp_endpoint *n, char *p, size_t size)
-{
-    size_t offset;
-
-    ip_addr_ntop(n->addr, p, size);
-    offset = strlen(p);
-    snprintf(p + offset, size - offset, ":%d", ntoh16(n->port));
-    return p;
-}
 
 static void
 udp_dump(const uint8_t *data, size_t len)
@@ -200,7 +166,8 @@ udp_pcb_queue_pop(struct udp_pcb *pcb)
 }
 
 static void
-udp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface) {
+udp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct ip_iface *iface)
+{
     struct pseudo_hdr pseudo;
     uint16_t psum = 0;
     struct udp_hdr *hdr;
@@ -260,13 +227,14 @@ udp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
 }
 
 ssize_t
-udp_output(struct udp_endpoint *src, struct udp_endpoint *dst, const  uint8_t *data, size_t len) {
+udp_output(struct ip_endpoint *src, struct ip_endpoint *dst, const  uint8_t *data, size_t len)
+{
     uint8_t buf[IP_PAYLOAD_SIZE_MAX];
     struct udp_hdr *hdr;
     struct pseudo_hdr pseudo;
     uint16_t total, psum = 0;
-    char ep1[UDP_ENDPOINT_STR_LEN];
-    char ep2[UDP_ENDPOINT_STR_LEN];
+    char ep1[IP_ENDPOINT_STR_LEN];
+    char ep2[IP_ENDPOINT_STR_LEN];
 
     if (len > IP_PAYLOAD_SIZE_MAX - sizeof(*hdr)) {
         errorf("too long");
@@ -287,7 +255,7 @@ udp_output(struct udp_endpoint *src, struct udp_endpoint *dst, const  uint8_t *d
     psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
     hdr->sum = cksum16((uint16_t *)hdr, total, psum);
     debugf("%s => %s, len=%zu (payload=%zu)",
-        udp_endpoint_ntop(src, ep1, sizeof(ep1)), udp_endpoint_ntop(dst, ep2, sizeof(ep2)), total, len);
+        ip_endpoint_ntop(src, ep1, sizeof(ep1)), ip_endpoint_ntop(dst, ep2, sizeof(ep2)), total, len);
     udp_dump((uint8_t *)hdr, total);
     if (ip_output(IP_PROTOCOL_UDP, (uint8_t *)hdr, total, src->addr, dst->addr) == -1) {
         errorf("ip_output() failure");
@@ -346,11 +314,11 @@ udp_close(int id)
 }
 
 int
-udp_bind(int id, struct udp_endpoint *local)
+udp_bind(int id, struct ip_endpoint *local)
 {
     struct udp_pcb *pcb, *exist;
-    char ep1[UDP_ENDPOINT_STR_LEN];
-    char ep2[UDP_ENDPOINT_STR_LEN];
+    char ep1[IP_ENDPOINT_STR_LEN];
+    char ep2[IP_ENDPOINT_STR_LEN];
 
     pthread_mutex_lock(&mutex);
     pcb = udp_pcb_get(id);
@@ -362,21 +330,21 @@ udp_bind(int id, struct udp_endpoint *local)
     exist = udp_pcb_select(local->addr, local->port);
     if (exist) {
         errorf("already in use, id=%d, want=%s, exist=%s",
-            id, udp_endpoint_ntop(local, ep1, sizeof(ep1)), udp_endpoint_ntop(&exist->local, ep2, sizeof(ep2)));
+            id, ip_endpoint_ntop(local, ep1, sizeof(ep1)), ip_endpoint_ntop(&exist->local, ep2, sizeof(ep2)));
         pthread_mutex_unlock(&mutex);
         return -1;
     }
     pcb->local = *local;
-    debugf("bound, id=%d, local=%s", id, udp_endpoint_ntop(&pcb->local, ep1, sizeof(ep1)));
+    debugf("bound, id=%d, local=%s", id, ip_endpoint_ntop(&pcb->local, ep1, sizeof(ep1)));
     pthread_mutex_unlock(&mutex);
     return 0;
 }
 
 ssize_t
-udp_sendto(int id, uint8_t *data, size_t len, struct udp_endpoint *foreign)
+udp_sendto(int id, uint8_t *data, size_t len, struct ip_endpoint *foreign)
 {
     struct udp_pcb *pcb;
-    struct udp_endpoint local;
+    struct ip_endpoint local;
     struct ip_iface *iface;
     char addr[IP_ADDR_STR_LEN];
     uint32_t p;
@@ -420,7 +388,7 @@ udp_sendto(int id, uint8_t *data, size_t len, struct udp_endpoint *foreign)
 }
 
 ssize_t
-udp_recvfrom(int id, uint8_t *buf, size_t size, struct udp_endpoint *foreign)
+udp_recvfrom(int id, uint8_t *buf, size_t size, struct ip_endpoint *foreign)
 {
     struct udp_pcb *pcb;
     struct udp_queue_entry *entry;

@@ -82,8 +82,8 @@ main(int argc, char *argv[])
 {
     int soc, acc;
     long int port;
-    struct tcp_endpoint local = {}, foreign;
-    char ep[TCP_ENDPOINT_STR_LEN];
+    struct ip_endpoint local = {}, foreign;
+    char ep[IP_ENDPOINT_STR_LEN];
     uint8_t buf[1024];
     ssize_t ret;
 
@@ -137,7 +137,7 @@ main(int argc, char *argv[])
         errorf("tcp_accept() failure");
         return -1;
     }
-    infof("connection accepted, foreign=%s", tcp_endpoint_ntop(&foreign, ep, sizeof(ep)));
+    infof("connection accepted, foreign=%s", ip_endpoint_ntop(&foreign, ep, sizeof(ep)));
     while (!terminate) {
         ret = tcp_receive(acc, buf, sizeof(buf));
         if (ret == -1) {

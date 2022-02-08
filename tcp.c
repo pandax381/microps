@@ -75,8 +75,8 @@ struct tcp_segment_info {
 struct tcp_pcb {
     int state;
     int mode; /* user command mode */
-    struct tcp_endpoint local;
-    struct tcp_endpoint foreign;
+    struct ip_endpoint local;
+    struct ip_endpoint foreign;
     struct {
         uint32_t nxt;
         uint32_t una;
@@ -116,41 +116,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct tcp_pcb pcbs[TCP_PCB_SIZE];
 
 static ssize_t
-tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign);
-
-int
-tcp_endpoint_pton(char *p, struct tcp_endpoint *n)
-{
-    char *sep;
-    char addr[IP_ADDR_STR_LEN] = {};
-    long int port;
-
-    sep = strrchr(p, ':');
-    if (!sep) {
-        return -1;
-    }
-    memcpy(addr, p, sep - p);
-    if (ip_addr_pton(addr, &n->addr) == -1) {
-        return -1;
-    }
-    port = strtol(sep+1, NULL, 10);
-    if (port <= 0 || port > UINT16_MAX) {
-        return -1;
-    }
-    n->port = hton16(port);
-    return 0;
-}
-
-char *
-tcp_endpoint_ntop(struct tcp_endpoint *n, char *p, size_t size)
-{
-    size_t offset;
-
-    ip_addr_ntop(n->addr, p, size);
-    offset = strlen(p);
-    snprintf(p + offset, size - offset, ":%d", ntoh16(n->port));
-    return p;
-}
+tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign);
 
 static char *
 tcp_flg_ntoa(uint8_t flg)
@@ -236,7 +202,7 @@ tcp_pcb_release(struct tcp_pcb *pcb)
 }
 
 static struct tcp_pcb *
-tcp_pcb_select(struct tcp_endpoint *local, struct tcp_endpoint *foreign)
+tcp_pcb_select(struct ip_endpoint *local, struct ip_endpoint *foreign)
 {
     struct tcp_pcb *pcb, *listen_pcb = NULL;
 
@@ -362,15 +328,15 @@ tcp_set_timewait_timer(struct tcp_pcb *pcb)
 }
 
 static ssize_t
-tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign)
+tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign)
 {
     uint8_t buf[IP_PAYLOAD_SIZE_MAX] = {};
     struct tcp_hdr *hdr;
     struct pseudo_hdr pseudo;
     uint16_t psum;
     uint16_t total;
-    char ep1[TCP_ENDPOINT_STR_LEN];
-    char ep2[TCP_ENDPOINT_STR_LEN];
+    char ep1[IP_ENDPOINT_STR_LEN];
+    char ep2[IP_ENDPOINT_STR_LEN];
 
     hdr = (struct tcp_hdr *)buf;
     hdr->src = local->port;
@@ -392,7 +358,7 @@ tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_
     psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
     hdr->sum = cksum16((uint16_t *)hdr, total, psum);
     debugf("%s => %s, len=%zu (payload=%zu)",
-        tcp_endpoint_ntop(local, ep1, sizeof(ep1)), tcp_endpoint_ntop(foreign, ep2, sizeof(ep2)), total, len);
+        ip_endpoint_ntop(local, ep1, sizeof(ep1)), ip_endpoint_ntop(foreign, ep2, sizeof(ep2)), total, len);
     tcp_dump((uint8_t *)hdr, total);
     if (ip_output(IP_PROTOCOL_TCP, (uint8_t *)hdr, total, local->addr, foreign->addr) == -1) {
         return -1;
@@ -417,7 +383,7 @@ tcp_output(struct tcp_pcb *pcb, uint8_t flg, uint8_t *data, size_t len)
 
 /* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
 static void
-tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct tcp_endpoint *local, struct tcp_endpoint *foreign)
+tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign)
 {
     struct tcp_pcb *pcb, *new_pcb;
     int acceptable = 0;
@@ -810,7 +776,7 @@ tcp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
     uint16_t psum, hlen;
     char addr1[IP_ADDR_STR_LEN];
     char addr2[IP_ADDR_STR_LEN];
-    struct tcp_endpoint local, foreign;
+    struct ip_endpoint local, foreign;
     struct tcp_segment_info seg;
 
     if (len < sizeof(*hdr)) {
@@ -913,7 +879,7 @@ tcp_init(void)
  */
 
 int
-tcp_open_rfc793(struct tcp_endpoint *local, struct tcp_endpoint *foreign, int active)
+tcp_open_rfc793(struct ip_endpoint *local, struct ip_endpoint *foreign, int active)
 {
     struct tcp_pcb *pcb;
     char addr1[IP_ADDR_STR_LEN];
@@ -1038,10 +1004,10 @@ tcp_open(void)
 }
 
 int
-tcp_connect(int id, struct tcp_endpoint *foreign)
+tcp_connect(int id, struct ip_endpoint *foreign)
 {
     struct tcp_pcb *pcb;
-    struct tcp_endpoint local;
+    struct ip_endpoint local;
     struct ip_iface *iface;
     char addr[IP_ADDR_STR_LEN];
     int p;
@@ -1129,7 +1095,7 @@ AGAIN:
 }
 
 int
-tcp_bind(int id, struct tcp_endpoint *local)
+tcp_bind(int id, struct ip_endpoint *local)
 {
     struct tcp_pcb *pcb, *exist;
     char addr[IP_ADDR_STR_LEN];
@@ -1182,7 +1148,7 @@ tcp_listen(int id, int backlog)
 }
 
 int
-tcp_accept(int id, struct tcp_endpoint *foreign)
+tcp_accept(int id, struct ip_endpoint *foreign)
 {
     struct tcp_pcb *pcb, *new_pcb;
     int new_id;

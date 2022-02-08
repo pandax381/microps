@@ -82,9 +82,9 @@ main(int argc, char *argv[])
 {
     int soc;
     long int port;
-    struct udp_endpoint local = {}, foreign;
+    struct ip_endpoint local = {}, foreign;
     uint8_t buf[1024];
-    char ep[UDP_ENDPOINT_STR_LEN];
+    char ep[IP_ENDPOINT_STR_LEN];
     ssize_t ret;
 
     /*
@@ -133,7 +133,7 @@ main(int argc, char *argv[])
         if (ret <= 0) {
             break;
         }
-        infof("%zu bytes data form %s", ret, udp_endpoint_ntop(&foreign, ep, sizeof(ep)));
+        infof("%zu bytes data form %s", ret, ip_endpoint_ntop(&foreign, ep, sizeof(ep)));
         hexdump(stderr, buf, ret);
         if (udp_sendto(soc, buf, ret, &foreign) == -1) {
             errorf("udp_sendto() failure");

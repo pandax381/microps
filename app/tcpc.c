@@ -83,7 +83,7 @@ main(int argc, char *argv[])
 {
     int opt, soc;
     long int port;
-    struct tcp_endpoint local = {}, foreign;
+    struct ip_endpoint local = {}, foreign;
     uint8_t buf[1024];
 
     /*
@@ -114,8 +114,8 @@ main(int argc, char *argv[])
         fprintf(stderr, "Usage: %s [-s local_addr] [-p local_port] foreign_addr:port\n", argv[0]);
         return -1;
     }
-    if (tcp_endpoint_pton(argv[optind], &foreign) == -1) {
-        errorf("tcp_endpoint_pton() failure, ep=%s", argv[optind]);
+    if (ip_endpoint_pton(argv[optind], &foreign) == -1) {
+        errorf("ip_endpoint_pton() failure, ep=%s", argv[optind]);
         return -1;
     }
     /*
