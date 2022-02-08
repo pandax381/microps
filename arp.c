@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
-#include <pthread.h>
 #include <sys/time.h>
+
+#include "platform.h"
 
 #include "util.h"
 #include "net.h"
@@ -49,7 +50,7 @@ struct arp_cache {
     struct timeval timestamp;
 };
 
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static mutex_t mutex = MUTEX_INITIALIZER;
 static struct arp_cache caches[ARP_CACHE_SIZE];
 
 static char *
@@ -240,18 +241,18 @@ arp_input(const uint8_t *data, size_t len, struct net_device *dev)
     arp_dump(data, len);
     memcpy(&spa, msg->spa, sizeof(spa));
     memcpy(&tpa, msg->tpa, sizeof(tpa));
-    pthread_mutex_lock(&mutex);
+    mutex_lock(&mutex);
     if (arp_cache_update(spa, msg->sha)) {
         /* updated */
         merge = 1;
     }
-    pthread_mutex_unlock(&mutex);
+    mutex_unlock(&mutex);
     iface = net_device_get_iface(dev, NET_IFACE_FAMILY_IP);
     if (iface && ((struct ip_iface *)iface)->unicast == tpa) {
         if (!merge) {
-            pthread_mutex_lock(&mutex);
+            mutex_lock(&mutex);
             arp_cache_insert(spa, msg->sha);
-            pthread_mutex_unlock(&mutex);
+            mutex_unlock(&mutex);
         }
         if (ntoh16(msg->hdr.op) == ARP_OP_REQUEST) {
             arp_reply(iface, msg->sha, spa, msg->sha);
@@ -274,12 +275,12 @@ arp_resolve(struct net_iface *iface, ip_addr_t pa, uint8_t *ha)
         debugf("unsupported protocol address type");
         return ARP_RESOLVE_ERROR;
     }
-    pthread_mutex_lock(&mutex);
+    mutex_lock(&mutex);
     cache = arp_cache_select(pa);
     if (!cache) {
         cache = arp_cache_alloc();
         if (!cache) {
-            pthread_mutex_unlock(&mutex);
+            mutex_unlock(&mutex);
             errorf("arp_cache_alloc() failure");
             return ARP_RESOLVE_ERROR;
         }
@@ -287,17 +288,17 @@ arp_resolve(struct net_iface *iface, ip_addr_t pa, uint8_t *ha)
         cache->pa = pa;
         gettimeofday(&cache->timestamp, NULL);
         arp_request(iface, pa);
-        pthread_mutex_unlock(&mutex);
+        mutex_unlock(&mutex);
         debugf("cache not found, pa=%s", ip_addr_ntop(pa, addr1, sizeof(addr1)));
         return ARP_RESOLVE_INCOMPLETE;
     }
     if (cache->state == ARP_CACHE_STATE_INCOMPLETE) {
         arp_request(iface, pa); /* just in case packet loss */
-        pthread_mutex_unlock(&mutex);
+        mutex_unlock(&mutex);
         return ARP_RESOLVE_INCOMPLETE;
     }
     memcpy(ha, cache->ha, ETHER_ADDR_LEN);
-    pthread_mutex_unlock(&mutex);
+    mutex_unlock(&mutex);
     debugf("resolved, pa=%s, ha=%s",
         ip_addr_ntop(pa, addr1, sizeof(addr1)), ether_addr_ntop(ha, addr2, sizeof(addr2)));
     return ARP_RESOLVE_FOUND;
@@ -309,7 +310,7 @@ arp_timer(void)
     struct arp_cache *entry;
     struct timeval now, diff;
 
-    pthread_mutex_lock(&mutex);
+    mutex_lock(&mutex);
     gettimeofday(&now, NULL);
     for (entry = caches; entry < tailof(caches); entry++) {
         if (entry->state != ARP_CACHE_STATE_FREE && entry->state != ARP_CACHE_STATE_STATIC) {
@@ -319,7 +320,7 @@ arp_timer(void)
             }
         }
     }
-    pthread_mutex_unlock(&mutex);
+    mutex_unlock(&mutex);
 }
 
 int

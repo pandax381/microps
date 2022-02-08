@@ -7,6 +7,8 @@
 #include <signal.h>
 #include <sys/time.h>
 
+#include "platform.h"
+
 #include "util.h"
 #include "net.h"
 
@@ -16,7 +18,7 @@ struct net_protocol {
     struct net_protocol *next;
     char name[16];
     uint16_t type;
-    pthread_mutex_t mutex; /* mutex for input queue */
+    mutex_t mutex; /* mutex for input queue */
     struct queue_head queue; /* input queue */
     void (*handler)(const uint8_t *data, size_t len, struct net_device *dev);
 };
@@ -50,9 +52,9 @@ net_device_alloc(void (*setup)(struct net_device *dev))
 {
     struct net_device *dev;
 
-    dev = calloc(1, sizeof(*dev));
+    dev = memory_alloc(sizeof(*dev));
     if (!dev) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return NULL;
     }
     if (setup) {
@@ -171,23 +173,23 @@ net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_dev
 
     for (proto = protocols; proto; proto = proto->next) {
         if (proto->type == type) {
-            entry = calloc(1, sizeof(*entry) + len);
+            entry = memory_alloc(sizeof(*entry) + len);
             if (!entry) {
-                errorf("calloc() failure");
+                errorf("memory_alloc() failure");
                 return -1;
             }
             entry->dev = dev;
             entry->len = len;
             memcpy(entry+1, data, len);
-            pthread_mutex_lock(&proto->mutex);
+            mutex_lock(&proto->mutex);
             if (!queue_push(&proto->queue, entry)) {
-                pthread_mutex_unlock(&proto->mutex);
+                mutex_unlock(&proto->mutex);
                 errorf("queue_push() failure");
-                free(entry);
+                memory_free(entry);
                 return -1;
             }
             num = proto->queue.num;
-            pthread_mutex_unlock(&proto->mutex);
+            mutex_unlock(&proto->mutex);
             debugf("queue pushed (num:%u), dev=%s, type=%s(0x%04x), len=%zd", num, dev->name, proto->name, type, len);
             debugdump(data, len);
             return 0;
@@ -209,14 +211,14 @@ net_protocol_register(const char *name, uint16_t type, void (*handler)(const uin
             return -1;
         }
     }
-    proto = calloc(1, sizeof(*proto));
+    proto = memory_alloc(sizeof(*proto));
     if (!proto) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return -1;
     }
     strncpy(proto->name, name, sizeof(proto->name)-1);
     proto->type = type;
-    pthread_mutex_init(&proto->mutex, NULL);
+    mutex_init(&proto->mutex);
     proto->handler = handler;
     proto->next = protocols;
     protocols = proto;
@@ -243,9 +245,9 @@ net_timer_register(const char *name, struct timeval interval, void (*handler)(vo
 {
     struct net_timer *timer;
 
-    timer = calloc(1, sizeof(*timer));
+    timer = memory_alloc(sizeof(*timer));
     if (!timer) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return -1;
     }
     strncpy(timer->name, name, sizeof(timer->name)-1);
@@ -278,15 +280,15 @@ net_thread(void *arg)
             }
         }
         for (proto = protocols; proto; proto = proto->next) {
-            pthread_mutex_lock(&proto->mutex);
-            entry = (struct net_protocol_queue_entry *)queue_pop(&proto->queue);
+            mutex_lock(&proto->mutex);
+            entry = queue_pop(&proto->queue);
             num = proto->queue.num;
-            pthread_mutex_unlock(&proto->mutex);
+            mutex_unlock(&proto->mutex);
             if (entry) {
                 debugf("queue poped (num:%u), dev=%s, type=%s(0x%04x), len=%zd", num, entry->dev->name, proto->name, proto->type, entry->len);
                 debugdump((uint8_t *)(entry+1), entry->len);
                 proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
-                free(entry);
+                memory_free(entry);
                 count++;
             }
         }

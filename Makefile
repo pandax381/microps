@@ -17,11 +17,13 @@ OBJS = util.o \
        udp.o \
        tcp.o \
 
-CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -I .
+CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -iquote .
 
 ifeq ($(shell uname),Linux)
-       CFLAGS := $(CFLAGS) -pthread
+       CFLAGS := $(CFLAGS) -pthread -iquote platform/linux
        DRIVERS := $(DRIVERS) driver/ether_tap_linux.o driver/ether_pcap_linux.o
+       LDFLAGS := $(LDFLAGS) -lrt
+       OBJS := $(OBJS) platform/linux/sched.o
 endif
 
 ifeq ($(shell uname),Darwin)

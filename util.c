@@ -9,6 +9,8 @@
 #include <time.h>
 #include <sys/time.h>
 
+#include "platform.h"
+
 #include "util.h"
 
 int
@@ -89,7 +91,7 @@ queue_push(struct queue_head *queue, void *data)
     if (!queue) {
         return NULL;
     }
-    entry = malloc(sizeof(*entry));
+    entry = memory_alloc(sizeof(*entry));
     if (!entry) {
         return NULL;
     }
@@ -122,7 +124,7 @@ queue_pop(struct queue_head *queue)
     }
     queue->num--;
     data = entry->data;
-    free(entry);
+    memory_free(entry);
     return data;
 }
 

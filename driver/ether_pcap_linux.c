@@ -12,6 +12,8 @@
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
 
+#include "platform.h"
+
 #include "util.h"
 #include "net.h"
 #include "ether.h"
@@ -176,9 +178,9 @@ ether_pcap_init(const char *name, const char *addr)
         }
     }
     dev->ops = &ether_pcap_ops;
-    pcap = calloc(1, sizeof(*pcap));
+    pcap = memory_alloc(sizeof(*pcap));
     if (!pcap) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return NULL;
     }
     strncpy(pcap->name, name, sizeof(pcap->name)-1);
@@ -186,7 +188,7 @@ ether_pcap_init(const char *name, const char *addr)
     dev->priv = pcap;
     if (net_device_register(dev) == -1) {
         errorf("net_device_register() failure");
-        free(pcap);
+        memory_free(pcap);
         return NULL;
     }
     debugf("ethernet device initialized, dev=%s", dev->name);

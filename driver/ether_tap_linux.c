@@ -12,6 +12,8 @@
 #include <linux/if.h>
 #include <linux/if_tun.h>
 
+#include "platform.h"
+
 #include "util.h"
 #include "net.h"
 #include "ether.h"
@@ -158,9 +160,9 @@ ether_tap_init(const char *name, const char *addr)
         }
     }
     dev->ops = &ether_tap_ops;
-    tap = calloc(1, sizeof(*tap));
+    tap = memory_alloc(sizeof(*tap));
     if (!tap) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return NULL;
     }
     strncpy(tap->name, name, sizeof(tap->name)-1);
@@ -168,7 +170,7 @@ ether_tap_init(const char *name, const char *addr)
     dev->priv = tap;
     if (net_device_register(dev) == -1) {
         errorf("net_device_register() failure");
-        free(tap);
+        memory_free(tap);
         return NULL;
     }
     debugf("ethernet device initialized, dev=%s", dev->name);

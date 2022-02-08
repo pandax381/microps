@@ -2,7 +2,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
+
+#include "platform.h"
 
 #include "util.h"
 #include "net.h"
@@ -156,9 +157,9 @@ ip_route_add(ip_addr_t network, ip_addr_t netmask, ip_addr_t nexthop, struct ip_
     char addr3[IP_ADDR_STR_LEN];
     char addr4[IP_ADDR_STR_LEN];
 
-    route = calloc(1, sizeof(*route));
+    route = memory_alloc(sizeof(*route));
     if (!route) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return NULL;
     }
     route->network = network;
@@ -226,20 +227,20 @@ ip_iface_alloc(const char *unicast, const char *netmask)
 {
     struct ip_iface *iface;
 
-    iface = calloc(1, sizeof(*iface));
+    iface = memory_alloc(sizeof(*iface));
     if (!iface) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return NULL;
     }
     NET_IFACE(iface)->family = NET_IFACE_FAMILY_IP;
     if (ip_addr_pton(unicast, &iface->unicast) == -1) {
         errorf("ip_addr_pton() failure, addr=%s", unicast);
-        free(iface);
+        memory_free(iface);
         return NULL;
     }
     if (ip_addr_pton(netmask, &iface->netmask) == -1) {
         errorf("ip_addr_pton() failure, addr=%s", netmask);
-        free(iface);
+        memory_free(iface);
         return NULL;
     }
     iface->broadcast = (iface->unicast & iface->netmask) | ~iface->netmask;
@@ -397,13 +398,13 @@ ip_output_core(struct ip_iface *iface, uint8_t protocol, const uint8_t *data, si
 static uint16_t
 ip_generate_id(void)
 {
-    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    static mutex_t mutex = MUTEX_INITIALIZER;
     static uint16_t id = 128;
     uint16_t ret;
 
-    pthread_mutex_lock(&mutex);
+    mutex_lock(&mutex);
     ret = id++;
-    pthread_mutex_unlock(&mutex);
+    mutex_unlock(&mutex);
     return ret;
 }
 
@@ -461,9 +462,9 @@ ip_protocol_register(const char *name, uint8_t type, void (*handler)(const uint8
             return -1;
         }
     }
-    entry = calloc(1, sizeof(*entry));
+    entry = memory_alloc(sizeof(*entry));
     if (!entry) {
-        errorf("calloc() failure");
+        errorf("memory_alloc() failure");
         return -1;
     }
     strncpy(entry->name, name, sizeof(entry->name)-1);
