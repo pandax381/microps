@@ -40,6 +40,7 @@ sched_sleep(struct sched_ctx *ctx, mutex_t *mutex, const struct timespec *abstim
             ctx->interrupted = 0;
         }
         errno = EINTR;
+        return -1;
     }
     return ret;
 }
