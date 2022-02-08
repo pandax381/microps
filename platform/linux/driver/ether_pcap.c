@@ -18,7 +18,7 @@
 #include "net.h"
 #include "ether.h"
 
-#include "ether_pcap.h"
+#include "driver/ether_pcap.h"
 
 struct ether_pcap {
     char name[IFNAMSIZ];

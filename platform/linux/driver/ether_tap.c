@@ -18,7 +18,7 @@
 #include "net.h"
 #include "ether.h"
 
-#include "ether_tap.h"
+#include "driver/ether_tap.h"
 
 #define CLONE_DEVICE "/dev/net/tun"
 

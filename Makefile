@@ -21,7 +21,7 @@ CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -iquote .
 
 ifeq ($(shell uname),Linux)
        CFLAGS := $(CFLAGS) -pthread -iquote platform/linux
-       DRIVERS := $(DRIVERS) driver/ether_tap_linux.o driver/ether_pcap_linux.o
+       DRIVERS := $(DRIVERS) platform/linux/driver/ether_tap.o platform/linux/driver/ether_pcap.o
        LDFLAGS := $(LDFLAGS) -lrt
        OBJS := $(OBJS) platform/linux/sched.o
 endif
