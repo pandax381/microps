@@ -7,6 +7,7 @@
 #include "platform.h"
 
 #include "util.h"
+#include "net.h"
 #include "ip.h"
 #include "udp.h"
 

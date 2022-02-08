@@ -6,8 +6,8 @@
 #include "platform.h"
 
 #include "util.h"
+#include "net.h"
 #include "ip.h"
-
 #include "tcp.h"
 
 #define TCP_FLG_FIN 0x01

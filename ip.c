@@ -265,7 +265,7 @@ ip_iface_register(struct net_device *dev, struct ip_iface *iface)
     }
     iface->next = ifaces;
     ifaces = iface;
-    infof("registerd: dev=%s, unicast=%s, netmask=%s, broadcast=%s",
+    infof("registered: dev=%s, unicast=%s, netmask=%s, broadcast=%s",
         dev->name,
         ip_addr_ntop(iface->unicast, addr1, sizeof(addr1)),
         ip_addr_ntop(iface->netmask, addr2, sizeof(addr2)),
@@ -291,7 +291,7 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
 {
     struct ip_hdr *hdr;
     uint8_t v;
-    uint16_t hlen, total;
+    uint16_t hlen, total, offset;
     struct ip_iface *iface;
     char addr[IP_ADDR_STR_LEN];
     struct ip_protocol *proto;
@@ -316,12 +316,13 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
         errorf("total length error: total=%u, len=%u", total, len);
         return;
     }
-    if (!hdr->ttl) {
-        errorf("time exeeded (ttl=0)");
-        return;
-    }
     if (cksum16((uint16_t *)hdr, hlen, 0) != 0) {
         errorf("checksum error: sum=0x%04x, verify=0x%04x", ntoh16(hdr->sum), ntoh16(cksum16((uint16_t *)hdr, hlen, -hdr->sum)));
+        return;
+    }
+    offset = ntoh16(hdr->offset);
+    if (offset & 0x2000 || offset & 0x1fff) {
+        errorf("fragments does not support");
         return;
     }
     iface = (struct ip_iface *)net_device_get_iface(dev, NET_IFACE_FAMILY_IP);
@@ -340,7 +341,7 @@ ip_input(const uint8_t *data, size_t len, struct net_device *dev)
     ip_dump(data, total);
     for (proto = protocols; proto; proto = proto->next) {
         if (proto->type == hdr->protocol) {
-            proto->handler((uint8_t *)hdr + hlen, len - hlen, hdr->src, hdr->dst, iface);
+            proto->handler((uint8_t *)hdr + hlen, total - hlen, hdr->src, hdr->dst, iface);
             return;
         }
     }
@@ -390,7 +391,7 @@ ip_output_core(struct ip_iface *iface, uint8_t protocol, const uint8_t *data, si
     hdr->sum = cksum16((uint16_t *)hdr, hlen, 0); /* don't convert bytoder */
     memcpy(hdr+1, data, len);
     debugf("dev=%s, iface=%s, protocol=%s(0x%02x), len=%u",
-        NET_IFACE(iface)->dev->name, ip_addr_ntop(dst, addr, sizeof(addr)), ip_protocol_name(protocol), protocol, total);
+        NET_IFACE(iface)->dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), ip_protocol_name(protocol), protocol, total);
     ip_dump(buf, total);
     return ip_output_device(iface, buf, total, nexthop);
 }
@@ -417,26 +418,21 @@ ip_output(uint8_t protocol, const uint8_t *data, size_t len, ip_addr_t src, ip_a
     ip_addr_t nexthop;
     uint16_t id;
 
-    if (src == IP_ADDR_ANY) {
-        route = ip_route_lookup(dst);
-        if (!route) {
-            errorf("no route to host, addr=%s", ip_addr_ntop(dst, addr, sizeof(addr)));
-            return -1;
-        }
-        iface = route->iface;
-        nexthop = (route->nexthop != IP_ADDR_ANY) ? route->nexthop : dst;
-    } else {
-        iface = ip_iface_select(src);
-        if (!iface) {
-            errorf("iface not found, addr=%s", ip_addr_ntop(src, addr, sizeof(addr)));
-            return -1;
-        }
-        if ((dst & iface->netmask) != (iface->unicast & iface->netmask) && dst != IP_ADDR_BROADCAST) {
-            errorf("not reached, addr=%s", ip_addr_ntop(src, addr, sizeof(addr)));
-            return -1;
-        }
-        nexthop = dst;
+    if (src == IP_ADDR_ANY && dst == IP_ADDR_BROADCAST) {
+        errorf("source address is required for broadcast addresses");
+        return -1;
     }
+    route = ip_route_lookup(dst);
+    if (!route) {
+        errorf("no route to host, addr=%s", ip_addr_ntop(dst, addr, sizeof(addr)));
+        return -1;
+    }
+    iface = route->iface;
+    if (src != IP_ADDR_ANY && src != iface->unicast) {
+        errorf("unable to output with specified source address, addr=%s", ip_addr_ntop(src, addr, sizeof(addr)));
+        return -1;
+    }
+    nexthop = (route->nexthop != IP_ADDR_ANY) ? route->nexthop : dst;
     if (NET_IFACE(iface)->dev->mtu < IP_HDR_SIZE_MIN + len) {
         errorf("too long, dev=%s, mtu=%s, tatal=%zu",
             NET_IFACE(iface)->dev->name, NET_IFACE(iface)->dev->mtu, IP_HDR_SIZE_MIN + len);
@@ -458,7 +454,7 @@ ip_protocol_register(const char *name, uint8_t type, void (*handler)(const uint8
 
     for (entry = protocols; entry; entry = entry->next) {
         if (entry->type == type) {
-            errorf("already registerd, type=%s(0x%02x), exist=%s(0x%02x)", name, type, entry->name, entry->type);
+            errorf("already exists, type=%s(0x%02x), exist=%s(0x%02x)", name, type, entry->name, entry->type);
             return -1;
         }
     }
@@ -472,7 +468,7 @@ ip_protocol_register(const char *name, uint8_t type, void (*handler)(const uint8
     entry->handler = handler;
     entry->next = protocols;
     protocols = entry;
-    infof("registerd, type=%s(0x%02x)", entry->name, entry->type);
+    infof("registered, type=%s(0x%02x)", entry->name, entry->type);
     return 0;
 }
 

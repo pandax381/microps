@@ -73,7 +73,7 @@ net_device_register(struct net_device *dev)
     snprintf(dev->name, sizeof(dev->name), "net%d", dev->index);
     dev->next = devices;
     devices = dev;
-    infof("registerd, dev=%s, type=0x%04x", dev->name, dev->type);
+    infof("registered, dev=%s, type=0x%04x", dev->name, dev->type);
     return 0;
 }
 
@@ -207,7 +207,7 @@ net_protocol_register(const char *name, uint16_t type, void (*handler)(const uin
 
     for (proto = protocols; proto; proto = proto->next) {
         if (type == proto->type) {
-            errorf("already registerd, type=%s(0x%04x), exist=%s(0x%04x)", name, type, proto->name, proto->type);
+            errorf("already registered, type=%s(0x%04x), exist=%s(0x%04x)", name, type, proto->name, proto->type);
             return -1;
         }
     }
@@ -222,7 +222,7 @@ net_protocol_register(const char *name, uint16_t type, void (*handler)(const uin
     proto->handler = handler;
     proto->next = protocols;
     protocols = proto;
-    infof("registerd, type=%s(0x%04x)", proto->name, type);
+    infof("registered, type=%s(0x%04x)", proto->name, type);
     return 0;
 }
 
@@ -256,7 +256,7 @@ net_timer_register(const char *name, struct timeval interval, void (*handler)(vo
     timer->handler = handler;
     timer->next = timers;
     timers = timer;
-    infof("registerd: %s interval={%d, %d}", timer->name, interval.tv_sec, interval.tv_usec);
+    infof("registered: %s interval={%d, %d}", timer->name, interval.tv_sec, interval.tv_usec);
     return 0;
 }
 
