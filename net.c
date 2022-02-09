@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <signal.h>
 #include <sys/time.h>
 
@@ -12,13 +11,10 @@
 #include "util.h"
 #include "net.h"
 
-#define NET_THREAD_SLEEP_TIME 1000 /* micro seconds */
-
 struct net_protocol {
     struct net_protocol *next;
     char name[16];
     uint16_t type;
-    mutex_t mutex; /* mutex for input queue */
     struct queue_head queue; /* input queue */
     void (*handler)(const uint8_t *data, size_t len, struct net_device *dev);
 };
@@ -37,15 +33,17 @@ struct net_timer {
     void (*handler)(void);
 };
 
-static pthread_t thread;
-static volatile sig_atomic_t terminate;
-
-volatile sig_atomic_t net_interrupt;
+struct net_event {
+    struct net_event *next;
+    void (*handler)(void *arg);
+    void *arg;
+};
 
 /* NOTE: if you want to add/delete the entries after net_run(), you need to protect these lists with a mutex. */
 static struct net_device *devices;
 static struct net_protocol *protocols;
 static struct net_timer *timers;
+static struct net_event *events;
 
 struct net_device *
 net_device_alloc(void (*setup)(struct net_device *dev))
@@ -169,7 +167,6 @@ net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_dev
 {
     struct net_protocol *proto;
     struct net_protocol_queue_entry *entry;
-    unsigned int num;
 
     for (proto = protocols; proto; proto = proto->next) {
         if (proto->type == type) {
@@ -181,17 +178,14 @@ net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_dev
             entry->dev = dev;
             entry->len = len;
             memcpy(entry+1, data, len);
-            mutex_lock(&proto->mutex);
             if (!queue_push(&proto->queue, entry)) {
-                mutex_unlock(&proto->mutex);
                 errorf("queue_push() failure");
                 memory_free(entry);
                 return -1;
             }
-            num = proto->queue.num;
-            mutex_unlock(&proto->mutex);
-            debugf("queue pushed (num:%u), dev=%s, type=%s(0x%04x), len=%zd", num, dev->name, proto->name, type, len);
+            debugf("queue pushed (num:%u), dev=%s, type=%s(0x%04x), len=%zd", proto->queue.num, dev->name, proto->name, type, len);
             debugdump(data, len);
+            raise_softirq();
             return 0;
         }
     }
@@ -218,7 +212,6 @@ net_protocol_register(const char *name, uint16_t type, void (*handler)(const uin
     }
     strncpy(proto->name, name, sizeof(proto->name)-1);
     proto->type = type;
-    mutex_init(&proto->mutex);
     proto->handler = handler;
     proto->next = protocols;
     protocols = proto;
@@ -237,6 +230,29 @@ net_protocol_name(uint16_t type)
         }
     }
     return "UNKNOWN";
+}
+
+int
+net_protocol_handler(void)
+{
+    struct net_protocol *proto;
+    struct net_protocol_queue_entry *entry;
+    unsigned int num;
+
+    for (proto = protocols; proto; proto = proto->next) {
+        while (1) {
+            entry = queue_pop(&proto->queue);
+            if (!entry) {
+                break;
+            }
+            num = proto->queue.num;
+            debugf("queue popped (num:%u), dev=%s, type=0x%04x, len=%zd", num, entry->dev->name, proto->type, entry->len);
+            debugdump((uint8_t *)(entry+1), entry->len);
+            proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
+            free(entry);
+        }
+    }
+    return 0;
 }
 
 /* NOTE: must not be call after net_run() */
@@ -260,68 +276,71 @@ net_timer_register(const char *name, struct timeval interval, void (*handler)(vo
     return 0;
 }
 
-static void *
-net_thread(void *arg)
+int
+net_timer_handler(void)
 {
-    unsigned int count, num;
-    struct net_device *dev;
-    struct net_protocol *proto;
-    struct net_protocol_queue_entry *entry;
     struct net_timer *timer;
     struct timeval now, diff;
 
-    while (!terminate) {
-        count = 0;
-        for (dev = devices; dev; dev = dev->next) {
-            if (NET_DEVICE_IS_UP(dev)) {
-                if (dev->ops->poll && dev->ops->poll(dev) != -1) {
-                    count++;
-                }
-            }
-        }
-        for (proto = protocols; proto; proto = proto->next) {
-            mutex_lock(&proto->mutex);
-            entry = queue_pop(&proto->queue);
-            num = proto->queue.num;
-            mutex_unlock(&proto->mutex);
-            if (entry) {
-                debugf("queue poped (num:%u), dev=%s, type=%s(0x%04x), len=%zd", num, entry->dev->name, proto->name, proto->type, entry->len);
-                debugdump((uint8_t *)(entry+1), entry->len);
-                proto->handler((uint8_t *)(entry+1), entry->len, entry->dev);
-                memory_free(entry);
-                count++;
-            }
-        }
-        for (timer = timers; timer; timer = timer->next) {
-            gettimeofday(&now, NULL);
-            timersub(&now, &timer->last, &diff);
-            if (timercmp(&timer->interval, &diff, <) != 0) { /* true (!0) or false (0) */
-                timer->handler();
-                timer->last = now;
-            }
-        }
-        if (!count) {
-            usleep(NET_THREAD_SLEEP_TIME);
+    for (timer = timers; timer; timer = timer->next) {
+        gettimeofday(&now, NULL);
+        timersub(&now, &timer->last, &diff);
+        if (timercmp(&timer->interval, &diff, <) != 0) { /* true (!0) or false (0) */
+            timer->handler();
+            timer->last = now;
         }
     }
-    return NULL;
+    return 0;
+}
+
+int
+net_interrupt(void)
+{
+    /* getpid(2) and kill(2) are signal safety functions. see signal-safety(7). */
+    return kill(getpid(), SIGUSR2);
+}
+
+/* NOTE: must not be call after net_run() */
+int
+net_event_subscribe(void (*handler)(void *arg), void *arg)
+{
+    struct net_event *event;
+
+    event = memory_alloc(sizeof(*event));
+    if (!event) {
+        errorf("memory_alloc() failure");
+        return -1;
+    }
+    event->handler = handler;
+    event->arg = arg;
+    event->next = events;
+    events = event;
+    return 0;
+}
+
+int
+net_event_handler(void)
+{
+    struct net_event *event;
+
+    for (event = events; event; event = event->next) {
+        event->handler(event->arg);
+    }
+    return 0;
 }
 
 int
 net_run(void)
 {
     struct net_device *dev;
-    int err;
 
+    if (intr_run() == -1) {
+        errorf("intr_run() failure");
+        return -1;
+    }
     debugf("open all devices...");
     for (dev = devices; dev; dev = dev->next) {
         net_device_open(dev);
-    }
-    debugf("create background thread...");
-    err = pthread_create(&thread, NULL, net_thread, NULL);
-    if (err) {
-        errorf("pthread_create() failure, err=%d", err);
-        return -1;
     }
     debugf("running...");
     return 0;
@@ -331,15 +350,7 @@ void
 net_shutdown(void)
 {
     struct net_device *dev;
-    int err;
 
-    debugf("terminate background thread...");
-    terminate = 1;
-    err = pthread_join(thread, NULL);
-    if (err) {
-        errorf("pthread_join() failure, err=%d", err);
-        return;
-    }
     debugf("close all devices...");
     for (dev = devices; dev; dev = dev->next) {
         net_device_close(dev);
@@ -356,6 +367,10 @@ net_shutdown(void)
 int
 net_init(void)
 {
+    if (intr_init() == -1) {
+        errorf("intr_init() failure");
+        return -1;
+    }
     if (arp_init() == -1) {
         errorf("arp_init() failure");
         return -1;
@@ -373,8 +388,9 @@ net_init(void)
         return -1;
     }
     if (tcp_init() == -1) {
-        errorf("icmp_init() failure");
+        errorf("tcp_init() failure");
         return -1;
     }
+    infof("initialized");
     return 0;
 }

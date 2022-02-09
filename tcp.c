@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/time.h>
 
 #include "platform.h"
 
@@ -97,7 +99,6 @@ struct tcp_pcb {
     uint16_t mss;
     uint8_t buf[65535]; /* receive buffer */
     struct sched_ctx ctx;
-    int wait; /* number of wait for cond */
     struct queue_head queue; /* retransmit queue */
     struct timeval tw_timer;
     struct tcp_pcb *parent;
@@ -847,11 +848,21 @@ tcp_timer(void)
                 continue;
             }
         }
-        if (net_interrupt) {
-            sched_wakeup(&pcb->ctx);
-            continue;
-        }
         queue_foreach(&pcb->queue, tcp_retransmit_queue_emit, pcb);
+    }
+    mutex_unlock(&mutex);
+}
+
+static void
+event_handler(void *arg)
+{
+    struct tcp_pcb *pcb;
+
+    mutex_lock(&mutex);
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if (pcb->state != TCP_PCB_STATE_FREE) {
+            sched_interrupt(&pcb->ctx);
+        }
     }
     mutex_unlock(&mutex);
 }
@@ -869,6 +880,7 @@ tcp_init(void)
         errorf("net_timer_register() failure");
         return -1;
     }
+    net_event_subscribe(event_handler, NULL);
     return 0;
 }
 
@@ -883,7 +895,6 @@ tcp_open_rfc793(struct ip_endpoint *local, struct ip_endpoint *foreign, int acti
     char ep1[IP_ENDPOINT_STR_LEN];
     char ep2[IP_ENDPOINT_STR_LEN];
     int state, id;
-    struct timespec timeout;
 
     mutex_lock(&mutex);
     pcb = tcp_pcb_alloc();
@@ -921,17 +932,15 @@ tcp_open_rfc793(struct ip_endpoint *local, struct ip_endpoint *foreign, int acti
 AGAIN:
     state = pcb->state;
     /* waiting for state changed */
-    while ((pcb->state == state) && !net_interrupt) {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timespec_add_nsec(&timeout, 10000000); /* 100ms */
-        sched_sleep(&pcb->ctx, &mutex, &timeout);
-    }
-    if (net_interrupt) {
-        errorf("interrupt");
-        pcb->state = TCP_PCB_STATE_CLOSED;
-        tcp_pcb_release(pcb);
-        mutex_unlock(&mutex);
-        return -1;
+    while (pcb->state == state) {
+        if (sched_sleep(&pcb->ctx, &mutex, NULL) == -1) {
+            debugf("interrupted");
+            pcb->state = TCP_PCB_STATE_CLOSED;
+            tcp_pcb_release(pcb);
+            mutex_unlock(&mutex);
+            errno = EINTR;
+            return -1;
+        }
     }
     if (pcb->state != TCP_PCB_STATE_ESTABLISHED) {
         if (pcb->state == TCP_PCB_STATE_SYN_RECEIVED) {
@@ -1005,7 +1014,6 @@ tcp_connect(int id, struct ip_endpoint *foreign)
     char addr[IP_ADDR_STR_LEN];
     int p;
     int state;
-    struct timespec timeout;
 
     mutex_lock(&mutex);
     pcb = tcp_pcb_get(id);
@@ -1024,7 +1032,7 @@ tcp_connect(int id, struct ip_endpoint *foreign)
     if (local.addr == IP_ADDR_ANY) {
         iface = ip_route_get_iface(foreign->addr);
         if (!iface) {
-            errorf("");
+            errorf("ip_route_get_iface() failure");
             mutex_unlock(&mutex);
             return -1;
         }
@@ -1065,10 +1073,15 @@ tcp_connect(int id, struct ip_endpoint *foreign)
 AGAIN:
     state = pcb->state;
     // waiting for state changed
-    while ((pcb->state == state) && !net_interrupt) {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timespec_add_nsec(&timeout, 10000000); /* 100ms */
-        sched_sleep(&pcb->ctx, &mutex, &timeout);
+    while (pcb->state == state) {
+        if (sched_sleep(&pcb->ctx, &mutex, NULL) == -1) {
+            debugf("interrupted");
+            pcb->state = TCP_PCB_STATE_CLOSED;
+            tcp_pcb_release(pcb);
+            mutex_unlock(&mutex);
+            errno = EINTR;
+            return -1;
+        }
     }
     if (pcb->state != TCP_PCB_STATE_ESTABLISHED) {
         if (pcb->state == TCP_PCB_STATE_SYN_RECEIVED) {
@@ -1143,7 +1156,6 @@ tcp_accept(int id, struct ip_endpoint *foreign)
 {
     struct tcp_pcb *pcb, *new_pcb;
     int new_id;
-    struct timespec timeout;
 
     mutex_lock(&mutex);
     pcb = tcp_pcb_get(id);
@@ -1162,15 +1174,19 @@ tcp_accept(int id, struct ip_endpoint *foreign)
         mutex_unlock(&mutex);
         return -1;
     }
-    while (!(new_pcb = queue_pop(&pcb->backlog)) && !net_interrupt) {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timespec_add_nsec(&timeout, 10000000); /* 100ms */
-        sched_sleep(&pcb->ctx, &mutex, &timeout);
-    }
-    if (!new_pcb) {
-        /* interrup */
-        mutex_unlock(&mutex);
-        return -1;
+    while (!(new_pcb = queue_pop(&pcb->backlog))) {
+        if (sched_sleep(&pcb->ctx, &mutex, NULL) == -1) {
+            debugf("interrupted");
+            mutex_unlock(&mutex);
+            errno = EINTR;
+            return -1;
+        }
+        if (pcb->state == TCP_PCB_STATE_CLOSED) {
+            debugf("closed");
+            tcp_pcb_release(pcb);
+            mutex_unlock(&mutex);
+            return -1;
+        }
     }
     if (foreign) {
         *foreign = new_pcb->foreign;
@@ -1191,7 +1207,6 @@ tcp_send(int id, uint8_t *data, size_t len)
     ssize_t sent = 0;
     struct ip_iface *iface;
     size_t mss, cap, slen;
-    struct timespec timeout;
 
     mutex_lock(&mutex);
     pcb = tcp_pcb_get(id);
@@ -1229,10 +1244,13 @@ RETRY:
         while (sent < (ssize_t)len) {
             cap = pcb->snd.wnd - (pcb->snd.nxt - pcb->snd.una);
             if (!cap) {
-                clock_gettime(CLOCK_REALTIME, &timeout);
-                timespec_add_nsec(&timeout, 10000000); /* 100ms */
-                sched_sleep(&pcb->ctx, &mutex, &timeout);
-                if (net_interrupt) {
+                if (sched_sleep(&pcb->ctx, &mutex, NULL) == -1) {
+                    debugf("interrupted");
+                    if (!sent) {
+                        mutex_unlock(&mutex);
+                        errno = EINTR;
+                        return -1;
+                    }
                     break;
                 }
                 goto RETRY;
@@ -1271,7 +1289,6 @@ tcp_receive(int id, uint8_t *buf, size_t size)
 {
     struct tcp_pcb *pcb;
     size_t remain, len;
-    struct timespec timeout;
 
     mutex_lock(&mutex);
     pcb = tcp_pcb_get(id);
@@ -1298,12 +1315,10 @@ RETRY:
     case TCP_PCB_STATE_FIN_WAIT2:
         remain = sizeof(pcb->buf) - pcb->rcv.wnd;
         if (!remain) {
-            clock_gettime(CLOCK_REALTIME, &timeout);
-            timespec_add_nsec(&timeout, 10000000); /* 100ms */
-            sched_sleep(&pcb->ctx, &mutex, &timeout);
-            if (net_interrupt) {
-                errorf("interrupt");
+            if (sched_sleep(&pcb->ctx, &mutex, NULL) == -1) {
+                debugf("interrupted");
                 mutex_unlock(&mutex);
+                errno = EINTR;
                 return -1;
             }
             goto RETRY;

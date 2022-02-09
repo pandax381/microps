@@ -35,6 +35,8 @@
 #define NET_PROTOCOL_TYPE_ARP  0x0806
 #define NTT_PROTOCOL_TYPE_IPV6 0x86dd
 
+#define NET_IRQ_SHARED 0x0001
+
 struct net_device; /* forward declaration */
 
 struct net_iface {
@@ -70,8 +72,6 @@ struct net_device {
     void *priv;
 };
 
-extern volatile sig_atomic_t net_interrupt;
-
 extern struct net_device *
 net_device_alloc(void (*setup)(struct net_device *dev));
 extern int
@@ -90,10 +90,21 @@ extern int
 net_protocol_register(const char *name, uint16_t type, void (*handler)(const uint8_t *data, size_t len, struct net_device *dev));
 extern char *
 net_protocol_name(uint16_t type);
+extern int
+net_protocol_handler(void);
 
 extern int
 net_timer_register(const char *name, struct timeval interval, void (*handler)(void));
+extern int
+net_timer_handler(void);
 
+extern int
+net_event_subscribe(void (*handler)(void *arg), void *arg);
+extern int
+net_event_handler(void);
+
+extern int
+net_interrupt(void);
 extern int
 net_run(void);
 extern void

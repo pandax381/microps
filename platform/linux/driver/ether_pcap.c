@@ -1,8 +1,10 @@
+#define _GNU_SOURCE /* for F_SETSIG */
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -20,9 +22,12 @@
 
 #include "driver/ether_pcap.h"
 
+#define ETHER_PCAP_IRQ (SIGRTMIN+3)
+
 struct ether_pcap {
     char name[IFNAMSIZ];
     int fd;
+    unsigned int irq;
 };
 
 #define PRIV(x) ((struct ether_pcap *)x->priv)
@@ -40,7 +45,7 @@ ether_pcap_addr(struct net_device *dev) {
     ifr.ifr_addr.sa_family = AF_INET;
     strncpy(ifr.ifr_name, PRIV(dev)->name, sizeof(ifr.ifr_name)-1);
     if (ioctl(soc, SIOCGIFHWADDR, &ifr) == -1) {
-        errorf("ioctl [SIOCGIFHWADDR]: %s, dev=%s", strerror(errno), dev->name);
+        errorf("ioctl(SIOCGIFHWADDR): %s, dev=%s", strerror(errno), dev->name);
         close(soc);
         return -1;
     }
@@ -65,7 +70,7 @@ ether_pcap_open(struct net_device *dev)
     }
     strncpy(ifr.ifr_name, pcap->name, sizeof(ifr.ifr_name)-1);
     if (ioctl(pcap->fd, SIOCGIFINDEX, &ifr) == -1) {
-        errorf("ioctl [SIOCGIFINDEX]: %s, dev=%s", strerror(errno), dev->name);
+        errorf("ioctl(SIOCGIFINDEX): %s, dev=%s", strerror(errno), dev->name);
         close(pcap->fd);
         return -1;
     }
@@ -78,13 +83,31 @@ ether_pcap_open(struct net_device *dev)
         return -1;
     }
     if (ioctl(pcap->fd, SIOCGIFFLAGS, &ifr) == -1) {
-        errorf("ioctl [SIOCGIFFLAGS]: %s, dev=%s", strerror(errno), dev->name);
+        errorf("ioctl(SIOCGIFFLAGS): %s, dev=%s", strerror(errno), dev->name);
         close(pcap->fd);
         return -1;
     }
     ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC;
     if (ioctl(pcap->fd, SIOCSIFFLAGS, &ifr) == -1) {
-        errorf("ioctl [SIOCSIFFLAGS]: %s, dev=%s", strerror(errno), dev->name);
+        errorf("ioctl(SIOCSIFFLAGS): %s, dev=%s", strerror(errno), dev->name);
+        close(pcap->fd);
+        return -1;
+    }
+    /* Set Asynchronous I/O signal delivery destination */
+    if (fcntl(pcap->fd, F_SETOWN, getpid()) == -1) {
+        errorf("fcntl(F_SETOWN): %s, dev=%s", strerror(errno), dev->name);
+        close(pcap->fd);
+        return -1;
+    }
+    /* Enable Asynchronous I/O */
+    if (fcntl(pcap->fd, F_SETFL, O_ASYNC) == -1) {
+        errorf("fcntl(F_SETFL): %s, dev=%s", strerror(errno), dev->name);
+        close(pcap->fd);
+        return -1;
+    }
+    /* Use other signal instead of SIGIO */
+    if (fcntl(pcap->fd, F_SETSIG, pcap->irq) == -1) {
+        errorf("fcntl(F_SETSIG): %s, dev=%s", strerror(errno), dev->name);
         close(pcap->fd);
         return -1;
     }
@@ -133,31 +156,35 @@ ether_pcap_read(struct net_device *dev, uint8_t *buf, size_t size)
 }
 
 static int
-ether_pcap_poll(struct net_device *dev)
+ether_pcap_isr(unsigned int irq, void *id)
 {
+    struct net_device *dev = (struct net_device *)id;
     struct pollfd pfd;
     int ret;
 
     pfd.fd = PRIV(dev)->fd;
     pfd.events = POLLIN;
-    ret = poll(&pfd, 1, 0);
-    switch (ret) {
-    case -1:
-        if (errno != EINTR) {
+    while (1) {
+        ret = poll(&pfd, 1, 0);
+        if (ret == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
             errorf("poll: %s, dev=%s", strerror(errno), dev->name);
+            return -1;
         }
-        /* fall through */
-    case 0:
-        return -1;
+        if (ret == 0) {
+            break;
+        }
+        ether_poll_helper(dev, ether_pcap_read);
     }
-    return ether_poll_helper(dev, ether_pcap_read);
+    return 0;
 }
 
 static struct net_device_ops ether_pcap_ops = {
     .open = ether_pcap_open,
     .close = ether_pcap_close,
     .transmit = ether_pcap_transmit,
-    .poll = ether_pcap_poll,
 };
 
 struct net_device *
@@ -185,12 +212,14 @@ ether_pcap_init(const char *name, const char *addr)
     }
     strncpy(pcap->name, name, sizeof(pcap->name)-1);
     pcap->fd = -1;
+    pcap->irq = ETHER_PCAP_IRQ;
     dev->priv = pcap;
     if (net_device_register(dev) == -1) {
         errorf("net_device_register() failure");
         memory_free(pcap);
         return NULL;
     }
+    intr_request_irq(pcap->irq, ether_pcap_isr, NET_IRQ_SHARED, dev->name, dev);
     debugf("ethernet device initialized, dev=%s", dev->name);
     return dev;
 }

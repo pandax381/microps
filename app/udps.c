@@ -24,7 +24,7 @@ on_signal(int s)
 {
     (void)s;
     terminate = 1;
-    net_interrupt = 1;
+    net_interrupt();
 }
 
 static int

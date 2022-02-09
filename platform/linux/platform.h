@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 /*
  * Memory
@@ -69,5 +72,22 @@ extern int
 sched_wakeup(struct sched_ctx *ctx);
 extern int
 sched_interrupt(struct sched_ctx *ctx);
+
+/*
+ * Interrupt
+ */
+
+extern int
+intr_request_irq(unsigned int irq, int (*handler)(unsigned int irq, void *id), int flags, const char *name, void *dev);
+extern int
+intr_run(void);
+extern int
+intr_init(void);
+
+static inline void
+raise_softirq(void)
+{
+    kill(getpid(), SIGUSR1);
+}
 
 #endif

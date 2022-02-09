@@ -23,7 +23,7 @@ ifeq ($(shell uname),Linux)
        CFLAGS := $(CFLAGS) -pthread -iquote platform/linux
        DRIVERS := $(DRIVERS) platform/linux/driver/ether_tap.o platform/linux/driver/ether_pcap.o
        LDFLAGS := $(LDFLAGS) -lrt
-       OBJS := $(OBJS) platform/linux/sched.o
+       OBJS := $(OBJS) platform/linux/sched.o platform/linux/intr.o
 endif
 
 ifeq ($(shell uname),Darwin)
