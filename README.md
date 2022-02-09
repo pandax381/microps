@@ -154,7 +154,7 @@ Logs
 
 ## Tutorial
 
-Build
+#### 1. Build
 
 ```
 $ git clone git@github.com:pandax381/microps.git
@@ -162,7 +162,7 @@ $ cd microps
 $ make
 ```
 
-Prepare Tap device
+#### 2. Prepare Tap device
 
 ```
 $ sudo ip tuntap add mode tap user $USER name tap0
@@ -172,7 +172,7 @@ $ sudo ip link set tap0 up
 
 > It is temporary and will disappear after reboot.
 
-Run sample application
+#### 3. Run sample application
 
 ```
 $ ./app/tcps.exe 7
@@ -186,7 +186,7 @@ $ ./app/tcps.exe 7
 
 > TCP Echo Server start on port 7. (default address is 192.0.2.2/24)
 
-Test (Operate in another terminal)
+#### 4. Test (Operate in another terminal)
 
 + Ping
 
@@ -209,9 +209,6 @@ bar
 ```
 
 > Sending text will be sent back by the Echo Server.
-
-
-### 
 
 ## License
 
