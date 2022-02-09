@@ -48,9 +48,9 @@ ip_addr_pton(const char *p, ip_addr_t *n);
 extern char *
 ip_addr_ntop(const ip_addr_t n, char *p, size_t size);
 extern int
-ip_endpoint_pton(char *p, struct ip_endpoint *n);
+ip_endpoint_pton(const char *p, struct ip_endpoint *n);
 extern char *
-ip_endpoint_ntop(struct ip_endpoint *n, char *p, size_t size);
+ip_endpoint_ntop(const struct ip_endpoint *n, char *p, size_t size);
 
 extern int
 ip_route_set_default_gateway(struct ip_iface *iface, const char *gateway);

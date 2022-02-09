@@ -83,7 +83,7 @@ ip_addr_ntop(const ip_addr_t n, char *p, size_t size)
 }
 
 int
-ip_endpoint_pton(char *p, struct ip_endpoint *n)
+ip_endpoint_pton(const char *p, struct ip_endpoint *n)
 {
     char *sep;
     char addr[IP_ADDR_STR_LEN] = {};
@@ -106,7 +106,7 @@ ip_endpoint_pton(char *p, struct ip_endpoint *n)
 }
 
 char *
-ip_endpoint_ntop(struct ip_endpoint *n, char *p, size_t size)
+ip_endpoint_ntop(const struct ip_endpoint *n, char *p, size_t size)
 {
     size_t offset;
 

@@ -16,6 +16,7 @@ OBJS = util.o \
        icmp.o \
        udp.o \
        tcp.o \
+       sock.o \
 
 CFLAGS := $(CFLAGS) -g -W -Wall -Wno-unused-parameter -iquote .
 
