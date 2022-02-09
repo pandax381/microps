@@ -5,12 +5,14 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <errno.h>
 
 #include "util.h"
 #include "net.h"
 #include "ip.h"
 #include "icmp.h"
 #include "udp.h"
+#include "sock.h"
 
 #include "driver/loopback.h"
 #include "driver/ether_tap.h"
@@ -82,9 +84,10 @@ main(int argc, char *argv[])
 {
     int soc;
     long int port;
-    struct ip_endpoint local = {}, foreign;
+    struct sockaddr_in local = { .sin_family=AF_INET }, foreign;
+    int foreignlen;
     uint8_t buf[1024];
-    char ep[IP_ENDPOINT_STR_LEN];
+    char addr[SOCKADDR_STR_LEN];
     ssize_t ret;
 
     /*
@@ -92,7 +95,7 @@ main(int argc, char *argv[])
      */
     switch (argc) {
     case 3:
-        if (ip_addr_pton(argv[argc-2], &local.addr) == -1) {
+        if (ip_addr_pton(argv[argc-2], &local.sin_addr) == -1) {
             errorf("ip_addr_pton() failure, addr=%s", optarg);
             return -1;
         }
@@ -103,7 +106,7 @@ main(int argc, char *argv[])
             errorf("invalid port, port=%s", optarg);
             return -1;
         }
-        local.port = hton16(port);
+        local.sin_port = hton16(port);
         break;
     default:
         fprintf(stderr, "Usage: %s [addr] port\n", argv[0]);
@@ -119,24 +122,29 @@ main(int argc, char *argv[])
     /*
      *  Application Code
      */
-    soc = udp_open();
+    soc = sock_open(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (soc == -1) {
-        errorf("udp_open() failure");
+        errorf("sock_open() failure");
         return -1;
     }
-    if (udp_bind(soc, &local) == -1) {
-        errorf("udp_bind() failure");
+    if (sock_bind(soc, (struct sockaddr *)&local, sizeof(local)) == -1) {
+        errorf("sock_bind() failure");
         return -1;
     }
     while (!terminate) {
-        ret = udp_recvfrom(soc, buf, sizeof(buf), &foreign);
-        if (ret <= 0) {
+        foreignlen = sizeof(foreignlen);
+        ret = sock_recvfrom(soc, buf, sizeof(buf), (struct sockaddr *)&foreign, &foreignlen);
+        if (ret == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            errorf("sock_recvfrom() failure");
             break;
         }
-        infof("%zu bytes data form %s", ret, ip_endpoint_ntop(&foreign, ep, sizeof(ep)));
+        infof("%zu bytes data form %s", ret, sockaddr_ntop((struct sockaddr *)&foreign, addr, sizeof(addr)));
         hexdump(stderr, buf, ret);
-        if (udp_sendto(soc, buf, ret, &foreign) == -1) {
-            errorf("udp_sendto() failure");
+        if (sock_sendto(soc, buf, ret, (struct sockaddr *)&foreign, foreignlen) == -1) {
+            errorf("sock_sendto() failure");
             break;
         }
     }

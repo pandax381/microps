@@ -5,12 +5,14 @@
 #include <signal.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <errno.h>
 
 #include "util.h"
 #include "net.h"
 #include "ip.h"
 #include "icmp.h"
 #include "tcp.h"
+#include "sock.h"
 
 #include "driver/loopback.h"
 #include "driver/ether_tap.h"
@@ -82,8 +84,9 @@ main(int argc, char *argv[])
 {
     int soc, acc;
     long int port;
-    struct ip_endpoint local = {}, foreign;
-    char ep[IP_ENDPOINT_STR_LEN];
+    struct sockaddr_in local = { .sin_family=AF_INET }, foreign;
+    int foreignlen;
+    char addr[SOCKADDR_STR_LEN];
     uint8_t buf[1024];
     ssize_t ret;
 
@@ -92,7 +95,7 @@ main(int argc, char *argv[])
      */
     switch (argc) {
     case 3:
-        if (ip_addr_pton(argv[argc-2], &local.addr) == -1) {
+        if (ip_addr_pton(argv[argc-2], &local.sin_addr) == -1) {
             errorf("ip_addr_pton() failure, addr=%s", optarg);
             return -1;
         }
@@ -103,7 +106,7 @@ main(int argc, char *argv[])
             errorf("invalid port, port=%s", optarg);
             return -1;
         }
-        local.port = hton16(port);
+        local.sin_port = hton16(port);
         break;
     default:
         fprintf(stderr, "Usage: %s [addr] port\n", argv[0]);
@@ -119,29 +122,33 @@ main(int argc, char *argv[])
     /*
      *  Application Code
      */
-    soc = tcp_open();
+    soc = sock_open(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (soc == -1) {
-        errorf("tcp_open() failure");
+        errorf("sock_open() failure");
         return -1;
     }
-    if (tcp_bind(soc, &local) == -1) {
-        errorf("tcp_bind() failure");
+    if (sock_bind(soc, (struct sockaddr *)&local, sizeof(local)) == -1) {
+        errorf("sock_bind() failure");
         return -1;
     }
-    if (tcp_listen(soc, 1) == -1) {
-        errorf("tcp_listen() failure");
+    if (sock_listen(soc, 1) == -1) {
+        errorf("sock_listen() failure");
         return -1;
     }
-    acc = tcp_accept(soc, &foreign);
+    foreignlen = sizeof(foreignlen);
+    acc = sock_accept(soc, (struct sockaddr *)&foreign, &foreignlen);
     if (acc == -1) {
-        errorf("tcp_accept() failure");
+        errorf("sock_accept() failure");
         return -1;
     }
-    infof("connection accepted, foreign=%s", ip_endpoint_ntop(&foreign, ep, sizeof(ep)));
+    infof("connection accepted, foreign=%s", sockaddr_ntop((struct sockaddr *)&foreign, addr, sizeof(addr)));
     while (!terminate) {
-        ret = tcp_receive(acc, buf, sizeof(buf));
+        ret = sock_recv(acc, buf, sizeof(buf));
         if (ret == -1) {
-            errorf("tcp_receive() failure");
+            if (errno == EINTR) {
+                continue;
+            }
+            errorf("sock_recv() failure");
             break;
         }
         if (ret == 0) {
@@ -150,12 +157,13 @@ main(int argc, char *argv[])
         }
         infof("%zu bytes received", ret);
         hexdump(stderr, buf, ret);
-        if (tcp_send(acc, buf, ret) == -1) {
-            errorf("tcp_send() failure");
+        if (sock_send(acc, buf, ret) == -1) {
+            errorf("sock_send() failure");
             break;
         }
     }
-    tcp_close(soc);
+    sock_close(acc);
+    sock_close(soc);
     /*
      * Cleanup protocol stack
      */

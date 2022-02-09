@@ -11,6 +11,7 @@
 #include "ip.h"
 #include "icmp.h"
 #include "tcp.h"
+#include "sock.h"
 
 #include "driver/loopback.h"
 #include "driver/ether_tap.h"
@@ -83,7 +84,7 @@ main(int argc, char *argv[])
 {
     int opt, soc;
     long int port;
-    struct ip_endpoint local = {}, foreign;
+    struct sockaddr_in local = { .sin_family=AF_INET }, foreign;
     uint8_t buf[1024];
 
     /*
@@ -92,7 +93,7 @@ main(int argc, char *argv[])
     while ((opt = getopt(argc, argv, "s:p:")) != -1) {
         switch (opt) {
         case 's':
-            if (ip_addr_pton(optarg, &local.addr) == -1) {
+            if (ip_addr_pton(optarg, &local.sin_addr) == -1) {
                 errorf("ip_addr_pton() failure, addr=%s", optarg);
                 return -1;
             }
@@ -103,7 +104,7 @@ main(int argc, char *argv[])
                 errorf("invalid port, port=%s", optarg);
                 return -1;
             }
-            local.port = hton16(port);
+            local.sin_port = hton16(port);
             break;
         default:
             fprintf(stderr, "Usage: %s [-s local_addr] [-p local_port] foreign_addr:port\n", argv[0]);
@@ -114,8 +115,8 @@ main(int argc, char *argv[])
         fprintf(stderr, "Usage: %s [-s local_addr] [-p local_port] foreign_addr:port\n", argv[0]);
         return -1;
     }
-    if (ip_endpoint_pton(argv[optind], &foreign) == -1) {
-        errorf("ip_endpoint_pton() failure, ep=%s", argv[optind]);
+    if (sockaddr_pton(argv[optind], (struct sockaddr *)&foreign, sizeof(foreign)) == -1) {
+        errorf("sockaddr_pton() failure, %s", argv[optind]);
         return -1;
     }
     /*
@@ -128,19 +129,19 @@ main(int argc, char *argv[])
     /*
      *  Application Code
      */
-    soc = tcp_open();
+    soc = sock_open(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (soc == -1) {
-        errorf("tcp_open() failure");
+        errorf("sock_open() failure");
         return -1;
     }
-    if (local.port) {
-        if (tcp_bind(soc, &local) == -1) {
-            errorf("tcp_bind() failure");
+    if (local.sin_port) {
+        if (sock_bind(soc, (struct sockaddr *)&local, sizeof(local)) == -1) {
+            errorf("sock_bind() failure");
             return -1;
         }
     }
-    if (tcp_connect(soc, &foreign) == -1) {
-        errorf("tcp_connect() failure");
+    if (sock_connect(soc, (struct sockaddr *)&foreign, sizeof(foreign)) == -1) {
+        errorf("sock_connect() failure");
         return -1;
     }
     infof("connection established");
@@ -148,12 +149,12 @@ main(int argc, char *argv[])
         if (!fgets((char *)buf, sizeof(buf), stdin)) {
             break;
         }
-        if (tcp_send(soc, buf, strlen((char *)buf)) == -1) {
-            errorf("tcp_send() failure");
+        if (sock_send(soc, buf, strlen((char *)buf)) == -1) {
+            errorf("sock_send() failure");
             break;
         }
     }
-    tcp_close(soc);
+    sock_close(soc);
     /*
      * Cleanup protocol stack
      */
