@@ -1,6 +1,7 @@
 #ifndef SOCK_H
 #define SOCK_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "ip.h"
