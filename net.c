@@ -1,14 +1,29 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "platform.h"
 
 #include "util.h"
 #include "net.h"
 
+struct net_protocol {
+    struct net_protocol *next;
+    uint16_t type;
+    struct queue_head queue; /* input queue */
+    void (*handler)(const uint8_t *data, size_t len, struct net_device *dev);
+};
+
+struct net_protocol_queue_entry {
+    struct net_device *dev;
+    size_t len;
+    uint8_t data[];
+};
+
 /* NOTE: if you want to add/delete the entries after net_run(), you need to protect these lists with a mutex. */
 static struct net_device *devices;
+static struct net_protocol *protocols;
 
 struct net_device *
 net_device_alloc(void)
@@ -93,11 +108,15 @@ net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data, si
     return 0;
 }
 
+/* NOTE: must not be call after net_run() */
+int
+net_protocol_register(uint16_t type, void (*handler)(const uint8_t *data, size_t len, struct net_device *dev))
+{
+}
+
 int
 net_input_handler(uint16_t type, const uint8_t *data, size_t len, struct net_device *dev)
 {
-    debugf("dev=%s, type=0x%04x, len=%zu", dev->name, type, len);
-    debugdump(data, len);
     return 0;
 }
 
