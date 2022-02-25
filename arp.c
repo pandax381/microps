@@ -179,6 +179,11 @@ arp_cache_insert(ip_addr_t pa, const uint8_t *ha)
 }
 
 static int
+arp_request(struct net_iface *iface, ip_addr_t tpa)
+{
+}
+
+static int
 arp_reply(struct net_iface *iface, const uint8_t *tha, ip_addr_t tpa, const uint8_t *dst)
 {
     struct arp_ether_ip reply;
