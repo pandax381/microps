@@ -6,6 +6,7 @@
 #include "platform.h"
 
 #include "util.h"
+#include "net.h"
 
 struct irq_entry {
     struct irq_entry *next;
