@@ -88,6 +88,17 @@ net_device_close(struct net_device *dev)
     return 0;
 }
 
+/* NOTE: must not be call after net_run() */
+int
+net_device_add_iface(struct net_device *dev, struct net_iface *iface)
+{
+}
+
+struct net_iface *
+net_device_get_iface(struct net_device *dev, int family)
+{
+}
+
 int
 net_device_output(struct net_device *dev, uint16_t type, const uint8_t *data, size_t len, const void *dst)
 {
