@@ -2,6 +2,8 @@
 #include <string.h>
 #include <signal.h>
 #include <pthread.h>
+#include <time.h>
+#include <errno.h>
 
 #include "platform.h"
 
@@ -60,6 +62,11 @@ int
 intr_raise_irq(unsigned int irq)
 {
     return pthread_kill(tid, (int)irq);
+}
+
+static int
+intr_timer_setup(struct itimerspec *interval)
+{
 }
 
 static void *
