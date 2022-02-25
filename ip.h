@@ -41,6 +41,11 @@ ip_addr_pton(const char *p, ip_addr_t *n);
 extern char *
 ip_addr_ntop(ip_addr_t n, char *p, size_t size);
 
+extern int
+ip_route_set_default_gateway(struct ip_iface *iface, const char *gateway);
+extern struct ip_iface *
+ip_route_get_iface(ip_addr_t dst);
+
 extern struct ip_iface *
 ip_iface_alloc(const char *addr, const char *netmask);
 extern int
