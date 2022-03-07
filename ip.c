@@ -83,6 +83,40 @@ ip_addr_ntop(ip_addr_t n, char *p, size_t size)
     return p;
 }
 
+int
+ip_endpoint_pton(const char *p, struct ip_endpoint *n)
+{
+    char *sep;
+    char addr[IP_ADDR_STR_LEN] = {};
+    long int port;
+
+    sep = strrchr(p, ':');
+    if (!sep) {
+        return -1;
+    }
+    memcpy(addr, p, sep - p);
+    if (ip_addr_pton(addr, &n->addr) == -1) {
+        return -1;
+    }
+    port = strtol(sep+1, NULL, 10);
+    if (port <= 0 || port > UINT16_MAX) {
+        return -1;
+    }
+    n->port = hton16(port);
+    return 0;
+}
+
+char *
+ip_endpoint_ntop(const struct ip_endpoint *n, char *p, size_t size)
+{
+    size_t offset;
+
+    ip_addr_ntop(n->addr, p, size);
+    offset = strlen(p);
+    snprintf(p + offset, size - offset, ":%d", ntoh16(n->port));
+    return p;
+}
+
 static void
 ip_dump(const uint8_t *data, size_t len)
 {
