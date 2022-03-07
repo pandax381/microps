@@ -54,6 +54,7 @@ mutex_unlock(mutex_t *mutex)
 
 #define INTR_IRQ_BASE (SIGRTMIN+1)
 #define INTR_IRQ_SOFTIRQ SIGUSR1
+#define INTR_IRQ_EVENT SIGUSR2
 
 #define INTR_IRQ_SHARED 0x0001
 
@@ -68,5 +69,28 @@ extern void
 intr_shutdown(void);
 extern int
 intr_init(void);
+
+/*
+ * Scheduler
+ */
+
+struct sched_ctx {
+    pthread_cond_t cond;
+    int interrupted;
+    int wc; /* wait count */
+};
+
+#define SCHED_CTX_INITIALIZER {PTHREAD_COND_INITIALIZER, 0, 0}
+
+extern int
+sched_ctx_init(struct sched_ctx *ctx);
+extern int
+sched_ctx_destroy(struct sched_ctx *ctx);
+extern int
+sched_sleep(struct sched_ctx *ctx, mutex_t *mutex, const struct timespec *abstime);
+extern int
+sched_wakeup(struct sched_ctx *ctx);
+extern int
+sched_interrupt(struct sched_ctx *ctx);
 
 #endif
