@@ -3,6 +3,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+
+#include "platform.h"
 
 #include "util.h"
 #include "ip.h"
@@ -17,6 +20,21 @@
 
 #define TCP_FLG_IS(x, y) ((x & 0x3f) == (y))
 #define TCP_FLG_ISSET(x, y) ((x & 0x3f) & (y) ? 1 : 0)
+
+#define TCP_PCB_SIZE 16
+
+#define TCP_PCB_STATE_FREE         0
+#define TCP_PCB_STATE_CLOSED       1
+#define TCP_PCB_STATE_LISTEN       2
+#define TCP_PCB_STATE_SYN_SENT     3
+#define TCP_PCB_STATE_SYN_RECEIVED 4
+#define TCP_PCB_STATE_ESTABLISHED  5
+#define TCP_PCB_STATE_FIN_WAIT1    6
+#define TCP_PCB_STATE_FIN_WAIT2    7
+#define TCP_PCB_STATE_CLOSING      8
+#define TCP_PCB_STATE_TIME_WAIT    9
+#define TCP_PCB_STATE_CLOSE_WAIT  10
+#define TCP_PCB_STATE_LAST_ACK    11
 
 struct pseudo_hdr {
     uint32_t src;
@@ -37,6 +55,42 @@ struct tcp_hdr {
     uint16_t sum;
     uint16_t up;
 };
+
+struct tcp_segment_info {
+    uint32_t seq;
+    uint32_t ack;
+    uint16_t len;
+    uint16_t wnd;
+    uint16_t up;
+};
+
+struct tcp_pcb {
+    int state;
+    struct ip_endpoint local;
+    struct ip_endpoint foreign;
+    struct {
+        uint32_t nxt;
+        uint32_t una;
+        uint16_t wnd;
+        uint16_t up;
+        uint32_t wl1;
+        uint32_t wl2;
+    } snd;
+    uint32_t iss;
+    struct {
+        uint32_t nxt;
+        uint16_t wnd;
+        uint16_t up;
+    } rcv;
+    uint32_t irs;
+    uint16_t mtu;
+    uint16_t mss;
+    uint8_t buf[65535]; /* receive buffer */
+    struct sched_ctx ctx;
+};
+
+static mutex_t mutex = MUTEX_INITIALIZER;
+static struct tcp_pcb pcbs[TCP_PCB_SIZE];
 
 static char *
 tcp_flg_ntoa(uint8_t flg)
@@ -73,6 +127,53 @@ tcp_dump(const uint8_t *data, size_t len)
     hexdump(stderr, data, len);
 #endif
     funlockfile(stderr);
+}
+
+/*
+ * TCP Protocol Control Block (PCB)
+ *
+ * NOTE: TCP PCB functions must be called after mutex locked
+ */
+
+static struct tcp_pcb *
+tcp_pcb_alloc(void)
+{
+}
+
+static void
+tcp_pcb_release(struct tcp_pcb *pcb)
+{
+}
+
+static struct tcp_pcb *
+tcp_pcb_select(struct ip_endpoint *local, struct ip_endpoint *foreign)
+{
+}
+
+static struct tcp_pcb *
+tcp_pcb_get(int id)
+{
+}
+
+static int
+tcp_pcb_id(struct tcp_pcb *pcb)
+{
+}
+
+static ssize_t
+tcp_output_segment(uint32_t seq, uint32_t ack, uint8_t flg, uint16_t wnd, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign)
+{
+}
+
+static ssize_t
+tcp_output(struct tcp_pcb *pcb, uint8_t flg, uint8_t *data, size_t len)
+{
+}
+
+/* rfc793 - section 3.9 [Event Processing > SEGMENT ARRIVES] */
+static void
+tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign)
+{
 }
 
 static void
