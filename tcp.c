@@ -570,3 +570,13 @@ tcp_close(int id)
     return 0;
 
 }
+
+ssize_t
+tcp_send(int id, uint8_t *data, size_t len)
+{
+}
+
+ssize_t
+tcp_receive(int id, uint8_t *buf, size_t size)
+{
+}
