@@ -1043,13 +1043,13 @@ tcp_connect(int id, struct ip_endpoint *foreign)
         for (p = TCP_SOURCE_PORT_MIN; p <= TCP_SOURCE_PORT_MAX; p++) {
             local.port = p;
             if (!tcp_pcb_select(&local, foreign)) {
-                debugf("dinamic assign srouce port: %d", ntoh16(local.port));
+                debugf("dynamic assign source port: %d", ntoh16(local.port));
                 pcb->local.port = local.port;
                 break;
             }
         }
         if (!local.port) {
-            debugf("failed to dinamic assign srouce port");
+            debugf("failed to dynamic assign source port");
             mutex_unlock(&mutex);
             return -1;
         }
