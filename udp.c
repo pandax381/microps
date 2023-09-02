@@ -368,12 +368,12 @@ udp_sendto(int id, uint8_t *data, size_t len, struct ip_endpoint *foreign)
         for (p = UDP_SOURCE_PORT_MIN; p <= UDP_SOURCE_PORT_MAX; p++) {
             if (!udp_pcb_select(local.addr, hton16(p))) {
                 pcb->local.port = hton16(p);
-                debugf("dinamic assign local port, port=%d", p);
+                debugf("dynamic assign local port, port=%d", p);
                 break;
             }
         }
         if (!pcb->local.port) {
-            debugf("failed to dinamic assign local port, addr=%s", ip_addr_ntop(local.addr, addr, sizeof(addr)));
+            debugf("failed to dynamic assign local port, addr=%s", ip_addr_ntop(local.addr, addr, sizeof(addr)));
             mutex_unlock(&mutex);
             return -1;
         }
