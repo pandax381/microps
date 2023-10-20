@@ -235,7 +235,7 @@ udp_output(struct ip_endpoint *src, struct ip_endpoint *dst, const  uint8_t *dat
     pseudo.len = hton16(total);
     psum = ~cksum16((uint16_t *)&pseudo, sizeof(pseudo), 0);
     hdr->sum = cksum16((uint16_t *)hdr, total, psum);
-    debugf("%s => %s, len=%zu (payload=%zu)",
+    debugf("%s => %s, len=%u (payload=%zu)",
         ip_endpoint_ntop(src, ep1, sizeof(ep1)), ip_endpoint_ntop(dst, ep2, sizeof(ep2)), total, len);
     udp_dump((uint8_t *)hdr, total);
     if (ip_output(IP_PROTOCOL_UDP, (uint8_t *)hdr, total, src->addr, dst->addr) == -1) {

@@ -272,7 +272,7 @@ net_timer_register(const char *name, struct timeval interval, void (*handler)(vo
     timer->handler = handler;
     timer->next = timers;
     timers = timer;
-    infof("registered: %s interval={%d, %d}", timer->name, interval.tv_sec, interval.tv_usec);
+    infof("registered: %s interval={%ld, %ld}", timer->name, interval.tv_sec, interval.tv_usec);
     return 0;
 }
 
