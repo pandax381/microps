@@ -388,7 +388,7 @@ ip_output_core(struct ip_iface *iface, uint8_t protocol, const uint8_t *data, si
     hdr->sum = 0;
     hdr->src = src;
     hdr->dst = dst;
-    hdr->sum = cksum16((uint16_t *)hdr, hlen, 0); /* don't convert bytoder */
+    hdr->sum = cksum16((uint16_t *)hdr, hlen, 0); /* don't convert byteorder */
     memcpy(hdr+1, data, len);
     debugf("dev=%s, iface=%s, protocol=%s(0x%02x), len=%u",
         NET_IFACE(iface)->dev->name, ip_addr_ntop(iface->unicast, addr, sizeof(addr)), ip_protocol_name(protocol), protocol, total);
