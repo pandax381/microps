@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <errno.h>
 
 #include "platform.h"
 
@@ -40,7 +41,7 @@ struct udp_pcb {
     int state;
     struct ip_endpoint local;
     struct queue_head queue; /* receive queue */
-    int wc; /* wait count */
+    struct sched_ctx ctx;
 };
 
 struct udp_queue_entry {
@@ -83,6 +84,7 @@ udp_pcb_alloc(void)
     for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
         if (pcb->state == UDP_PCB_STATE_FREE) {
             pcb->state = UDP_PCB_STATE_OPEN;
+            sched_ctx_init(&pcb->ctx);
             return pcb;
         }
     }
@@ -94,8 +96,9 @@ udp_pcb_release(struct udp_pcb *pcb)
 {
     struct queue_entry *entry;
 
-    if (pcb->wc) {
-        pcb->state = UDP_PCB_STATE_CLOSING;
+    pcb->state = UDP_PCB_STATE_CLOSING;
+    if (sched_ctx_destroy(&pcb->ctx) == -1) {
+        sched_wakeup(&pcb->ctx);
         return;
     }
     pcb->state = UDP_PCB_STATE_FREE;
@@ -206,6 +209,7 @@ udp_input(const uint8_t *data, size_t len, ip_addr_t src, ip_addr_t dst, struct 
         return;
     }
     debugf("queue pushed: id=%d, num=%d", udp_pcb_id(pcb), pcb->queue.num);
+    sched_wakeup(&pcb->ctx);
     mutex_unlock(&mutex);
 }
 
@@ -245,16 +249,6 @@ udp_output(struct ip_endpoint *src, struct ip_endpoint *dst, const  uint8_t *dat
         return -1;
     }
     return len;
-}
-
-int
-udp_init(void)
-{
-    if (ip_protocol_register(IP_PROTOCOL_UDP, udp_input) == -1) {
-        errorf("ip_protocol_register() failure");
-        return -1;
-    }
-    return 0;
 }
 
 /*
@@ -370,12 +364,27 @@ udp_sendto(int id, uint8_t *data, size_t len, struct ip_endpoint *foreign)
     return udp_output(&local, foreign, data, len);
 }
 
+static void
+event_handler(void *arg)
+{
+    struct udp_pcb *pcb;
+
+    mutex_lock(&mutex);
+    for (pcb = pcbs; pcb < tailof(pcbs); pcb++) {
+        if (pcb->state == UDP_PCB_STATE_OPEN) {
+            sched_interrupt(&pcb->ctx);
+        }
+    }
+    mutex_unlock(&mutex);
+}
+
 ssize_t
 udp_recvfrom(int id, uint8_t *buf, size_t size, struct ip_endpoint *foreign)
 {
     struct udp_pcb *pcb;
     struct udp_queue_entry *entry;
     ssize_t len;
+    int err;
 
     mutex_lock(&mutex);
     pcb = udp_pcb_get(id);
@@ -389,11 +398,15 @@ udp_recvfrom(int id, uint8_t *buf, size_t size, struct ip_endpoint *foreign)
         if (entry) {
             break;
         }
-        pcb->wc++;
-        mutex_unlock(&mutex);
-        sleep(1);
-        mutex_lock(&mutex);
-        pcb->wc--;
+        /* Wait to be woken up by sched_wakeup() or shced_interrupt() */
+        err = sched_sleep(&pcb->ctx, &mutex, NULL);
+        debugf("err = %d", err);
+        if (err) {
+            debugf("interrupted");
+            mutex_unlock(&mutex);
+            errno = EINTR;
+            return -1;
+        }
         if (pcb->state == UDP_PCB_STATE_CLOSING) {
             debugf("closed");
             udp_pcb_release(pcb);
@@ -408,4 +421,18 @@ udp_recvfrom(int id, uint8_t *buf, size_t size, struct ip_endpoint *foreign)
     len = MIN(size, entry->len); /* truncate */
     memcpy(buf, entry->data, len);
     return len;
+}
+
+int
+udp_init(void)
+{
+    if (ip_protocol_register(IP_PROTOCOL_UDP, udp_input) == -1) {
+        errorf("ip_protocol_register() failure");
+        return -1;
+    }
+    if (net_event_subscribe(event_handler, NULL) == -1) {
+        errorf("net_event_subscribe() failure");
+        return -1;
+    }
+    return 0;
 }
