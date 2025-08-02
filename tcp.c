@@ -267,7 +267,8 @@ tcp_output(struct tcp_pcb *pcb, uint8_t flg, uint8_t *data, size_t len)
 static void
 tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, size_t len, struct ip_endpoint *local, struct ip_endpoint *foreign)
 {
-   struct tcp_pcb *pcb;
+    struct tcp_pcb *pcb;
+
     pcb = tcp_pcb_select(local, foreign);
     if (!pcb || pcb->state == TCP_PCB_STATE_CLOSED) {
         if (TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
@@ -494,6 +495,7 @@ tcp_open_rfc793(struct ip_endpoint *local, struct ip_endpoint *foreign, int acti
     char ep1[IP_ENDPOINT_STR_LEN];
     char ep2[IP_ENDPOINT_STR_LEN];
     int state, id;
+
     mutex_lock(&mutex);
     pcb = tcp_pcb_alloc();
     if (!pcb) {
