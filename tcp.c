@@ -269,6 +269,7 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
 {
     struct tcp_pcb *pcb;
     int acceptable = 0;
+
     pcb = tcp_pcb_select(local, foreign);
     if (!pcb || pcb->state == TCP_PCB_STATE_CLOSED) {
         if (TCP_FLG_ISSET(flags, TCP_FLG_RST)) {
