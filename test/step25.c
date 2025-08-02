@@ -101,10 +101,12 @@ main(int argc, char *argv[])
         errorf("tcp_open_rfc793() failure");
         return -1;
     }
-    debugf("here is ok");
     while (!terminate) {
+        debugf("start to revceiv");
         ret = tcp_receive(soc, buf, sizeof(buf));
+        debugf("tcp_receive returned: %zd", ret);
         if (ret <= 0) {
+            errorf("tcp_receive failure");
             break;
         }
         hexdump(stderr, buf, ret);
