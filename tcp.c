@@ -493,6 +493,7 @@ tcp_segment_arrives(struct tcp_segment_info *seg, uint8_t flags, uint8_t *data, 
         if (len) {
             memcpy(pcb->buf + (sizeof(pcb->buf) - pcb->rcv.wnd), data, len);
             pcb->rcv.nxt = seg->seq + seg->len;
+            pcb->rcv.wnd -= len; 
             tcp_output(pcb, TCP_FLG_ACK, NULL, 0);
             sched_wakeup(&pcb->ctx);
         }
@@ -619,6 +620,7 @@ tcp_open_rfc793(struct ip_endpoint *local, struct ip_endpoint *foreign, int acti
         if (foreign) {
             pcb->foreign = *foreign;
         }
+        pcb->state = TCP_PCB_STATE_LISTEN;
     }  
 AGAIN:
     state = pcb->state;
