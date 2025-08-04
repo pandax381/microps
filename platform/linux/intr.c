@@ -74,6 +74,10 @@ intr_timer_setup(struct itimerspec *interval)
         errorf("timer_create: %s", strerror(errno));
         return -1;
     }
+    if (timer_settime(id, 0, interval, NULL) == -1) {
+        errorf("timer_settime: %s", strerror(errno));
+        return -1;
+    }
     return 0;
 }
 
@@ -164,5 +168,6 @@ intr_init(void)
     sigaddset(&sigmask, SIGHUP);
     sigaddset(&sigmask, SIGUSR1);
     sigaddset(&sigmask, SIGUSR2);
+    sigaddset(&sigmask, SIGALRM);
     return 0;
 }
