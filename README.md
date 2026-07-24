@@ -17,6 +17,10 @@ Books
 
 + [ゼロからのTCP/IPプロトコルスタック自作入門／マイナビ出版](https://book.mynavi.jp/ec/products/detail/id=149014) (Japanese)
 
+Third-party implementations
+
++ [microps-zig](https://github.com/arata-nvm/microps-zig) by @arata-nvm — Reimplementation in Zig
+
 ## Features
 
 Abstraction Layer
