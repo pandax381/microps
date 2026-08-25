@@ -107,6 +107,7 @@ sock_close(int desc)
     lock_acquire(&lock);
     s = sock_get(desc);
     if (!s) {
+        lock_release(&lock);
         return -1;
     }
     switch (s->family) {
