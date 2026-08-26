@@ -70,11 +70,17 @@ sock_free(struct sock *s)
 static struct sock *
 sock_get(int id)
 {
+    struct sock *s;
+
     if (id < 0 || id >= (int)countof(socks)) {
         /* out of range */
         return NULL;
     }
-    return &socks[id];
+    s = &socks[id];
+    if (!s->used) {
+        return NULL;
+    }
+    return s;
 }
 
 int
