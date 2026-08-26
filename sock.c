@@ -151,7 +151,7 @@ sock_recvfrom(int desc, void *buf, size_t n, struct sockaddr *addr, int *addrlen
     case AF_INET:
         switch (sock.type) {
         case SOCK_DGRAM:
-            ret = udp_cmd_recvfrom(s->desc, (uint8_t *)buf, n, &remote);
+            ret = udp_cmd_recvfrom(sock.desc, (uint8_t *)buf, n, &remote);
             if (addr && addrlen) {
                 ((struct sockaddr_in *)addr)->sin_addr.s_addr = remote.addr;
                 ((struct sockaddr_in *)addr)->sin_port = remote.port;
