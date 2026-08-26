@@ -247,17 +247,22 @@ sock_accept(int id, struct sockaddr *addr, int *addrlen)
     }
     switch (s->family) {
     case AF_INET:
-        ret = tcp_accept(s->desc, &ep);
-        if (ret == -1) {
+        new_s = sock_alloc();
+        if (!new_s)
+        {
             return -1;
         }
-        ((struct sockaddr_in *)addr)->sin_family = s->family;
-        ((struct sockaddr_in *)addr)->sin_addr = ep.addr;
-        ((struct sockaddr_in *)addr)->sin_port = ep.port;
-        new_s = sock_alloc();
+        ret = tcp_accept(s->desc, &ep);
+        if (ret == -1) {
+            sock_free(new_s);
+            return -1;
+        }
         new_s->family = s->family;
         new_s->type = s->type;
         new_s->desc = ret;
+        ((struct sockaddr_in *)addr)->sin_family = s->family;
+        ((struct sockaddr_in *)addr)->sin_addr = ep.addr;
+        ((struct sockaddr_in *)addr)->sin_port = ep.port;
         return indexof(socks, new_s);
     }
     return -1;
