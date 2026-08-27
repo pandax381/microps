@@ -1185,9 +1185,7 @@ tcp_cmd_close(int desc)
     debugf("desc=%d", desc);
     switch (pcb->state) {
     case TCP_STATE_CLOSED:
-        errorf("connection does not exist");
-        lock_release(&lock);
-        return -1;
+        break;
     case TCP_STATE_LISTEN:
     case TCP_STATE_SYN_SENT:
         TCP_STATE_CHANGE(pcb, TCP_STATE_CLOSED);
