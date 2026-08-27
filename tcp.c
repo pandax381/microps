@@ -1059,6 +1059,7 @@ tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active)
             if (!iface) {
                 errorf("iface not found that can reach remote address, addr=%s",
                     ip_addr_ntop(remote.addr, addr, sizeof(addr)));
+                tcp_pcb_release(pcb);
                 lock_release(&lock);
                 return -1;
             }
@@ -1077,6 +1078,7 @@ tcp_cmd_open(ip_endp_t local, ip_endp_t remote, int active)
             if (IP_ENDP_DYNAMIC_PORT_MAX < p) {
                 debugf("failed to dinamic assign local port, addr=%s",
                     ip_addr_ntop(local.addr, addr, sizeof(addr)));
+                tcp_pcb_release(pcb);
                 lock_release(&lock);
                 return -1;
             }
@@ -1139,6 +1141,7 @@ AGAIN:
     iface = ip_route_get_iface(pcb->remote.addr);
     if (!iface) {
         errorf("iface not found");
+        tcp_pcb_release(pcb);
         lock_release(&lock);
         return -1;
     }
