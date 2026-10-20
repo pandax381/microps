@@ -248,8 +248,7 @@ sock_accept(int id, struct sockaddr *addr, int *addrlen)
     switch (s->family) {
     case AF_INET:
         new_s = sock_alloc();
-        if (!new_s)
-        {
+        if (!new_s){
             return -1;
         }
         ret = tcp_accept(s->desc, &ep);
