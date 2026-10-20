@@ -106,6 +106,7 @@ sock_open(int domain, int type, int protocol)
         break;
     }
     if (s->desc == -1) {
+        sock_free(s);
         return -1;
     }
     return indexof(socks, s);
